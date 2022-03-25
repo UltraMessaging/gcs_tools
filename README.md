@@ -67,7 +67,8 @@ LD_LIBRARY_PATH="$LBM/lib"
 ### BUILD TEST TOOLS
 
 The "bld.sh" script can be used to build the tools on Linux.
-It relies on the "LBM" and "CP" [environment variables](#environment).
+It relies on the "LD_LIBRARY_PATH" and "LBM"
+[environment variables](#environment).
 
 ### BINARIES
 
