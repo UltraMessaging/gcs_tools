@@ -7,6 +7,12 @@ These modifications assist in supporting our customers.
 
 # Table of contents
 
+- [gcs_tools](#gcs_tools)
+- [Table of contents](#table-of-contents)
+  - [COPYRIGHT AND LICENSE](#copyright-and-license)
+  - [REPOSITORY](#repository)
+  - [INTRODUCTION](#introduction)
+
 <sup>(table of contents from https://luciopaiva.com/markdown-toc/)</sup>
 
 ## COPYRIGHT AND LICENSE
@@ -65,7 +71,7 @@ It relies on the "LBM" and "CP" [environment variables](#environment).
 
 ### BINARIES
 
-We have pre-built 64-bit executables for Lunix,
+We have pre-built 64-bit executables for Linux,
 built with UM 6.14, in the file "linux64_bin.tz".
 These can be extracted via:
 ````
