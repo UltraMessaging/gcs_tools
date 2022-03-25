@@ -62,3 +62,15 @@ LD_LIBRARY_PATH="$LBM/lib"
 
 The "bld.sh" script can be used to build the tools on Linux.
 It relies on the "LBM" and "CP" [environment variables](#environment).
+
+### BINARIES
+
+We have pre-built 64-bit executables for Lunix,
+built with UM 6.14, in the file "linux64_bin.tz".
+These can be extracted via:
+````
+tar xzf linux64_bin.tz
+````
+This will create the directory linux64_bin containing the executables.
+
+If you have an older version of UM, you will need to rebuild the tools.
