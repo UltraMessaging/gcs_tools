@@ -25,6 +25,9 @@ gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
     -o linux64_bin/gcssrc verifymsg.c gcssrc.c
 
 gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
-    -o linux64_bin/gcsssrc verifymsg.c gcsssrc.c
+    -o linux64_bin/gcsurcv verifymsg.c gcsurcv.c
+
+gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
+    -o linux64_bin/gcsusrc verifymsg.c gcsusrc.c
 
 tar czf linux64_bin.tz linux64_bin
