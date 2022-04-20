@@ -13,18 +13,18 @@ rm -rf linux64_bin linux64_bin.tz
 mkdir linux64_bin
 
 gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
-    -o linux64_bin/lbmmrcv verifymsg.c lbmmrcv.c
+    -o linux64_bin/gcsmrcv verifymsg.c gcsmrcv.c
 
 gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
-    -o linux64_bin/lbmmsrc verifymsg.c lbmmsrc.c
+    -o linux64_bin/gcsmsrc verifymsg.c gcsmsrc.c
 
 gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
-    -o linux64_bin/lbmrcv verifymsg.c lbmrcv.c
+    -o linux64_bin/gcsrcv verifymsg.c gcsrcv.c
 
 gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
-    -o linux64_bin/lbmsrc verifymsg.c lbmsrc.c
+    -o linux64_bin/gcssrc verifymsg.c gcssrc.c
 
 gcc -Wall -g -I $LBM/include -I $LBM/include/lbm -L $LBM/lib -l lbm $LIBS \
-    -o linux64_bin/lbmssrc verifymsg.c lbmssrc.c
+    -o linux64_bin/gcsssrc verifymsg.c gcsssrc.c
 
 tar czf linux64_bin.tz linux64_bin
