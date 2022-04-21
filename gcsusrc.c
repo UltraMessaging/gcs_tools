@@ -1,5 +1,5 @@
 /*
-"umqsrc.c: application that sends to a given topic (single
+"gcsusrc.c: application that sends to a given topic (single
 "  source) at a rate-limited pace. Understands UME.
 
   Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use

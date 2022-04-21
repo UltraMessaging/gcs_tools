@@ -1,5 +1,5 @@
 /*
-"lbmmrcv.c: application that receives messages from a set of topics
+"gcsmrcv.c: application that receives messages from a set of topics
 "  (multiple receivers).
 
   Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use

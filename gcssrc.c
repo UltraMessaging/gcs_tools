@@ -1,5 +1,5 @@
 /*
-"lbmsrc.c: application that sends to a given topic (single
+"gcssrc.c: application that sends to a given topic (single
 "  source) as fast as it can.
 
   Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use

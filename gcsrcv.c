@@ -1,5 +1,5 @@
 /*
-"lbmrcv.c: application that receives messages from a given topic
+"gcsrcv.c: application that receives messages from a given topic
 "  (single receiver).
 
   Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
@@ -74,7 +74,7 @@
 
 const char purpose[] = "Purpose: Receive messages on a single topic.";
 const char usage[] =
-"Usage: lbmrcv [-ACEfhqsSvV] [-c filename] [-r msgs] [-U losslev] topic\n"
+"Usage: gcsrcv [-ACEfhqsSvV] [-c filename] [-r msgs] [-U losslev] topic\n"
 "Available options:\n"
 "  -A, --ascii          display messages as ASCII text (-A -A = newlines after each msg)\n"
 "  -c, --config=FILE    Use LBM configuration file FILE.\n"

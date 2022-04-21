@@ -1,5 +1,5 @@
 /*
-"umercv.c: application that receives messages from a given topic
+"gcsurcv.c: application that receives messages from a given topic
 "  (single receiver). Understands UME.
 
   Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use

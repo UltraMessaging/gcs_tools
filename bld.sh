@@ -7,7 +7,7 @@ LD_LIBRARY_PATH=$LBM671/lib; export LD_LIBRARY_PATH
 # For Linux
 LIBS="-l pthread -l m -l rt"
 
-rm -rf linux64_bin linux64_bin.tz
+rm -rf linux64_bin linux64_bin.zip
 mkdir linux64_bin
 
 gcc -Wall -g -I $LBM671/include -I $LBM671/include/lbm -L $LBM671/lib -l lbm $LIBS \
@@ -28,4 +28,13 @@ gcc -Wall -g -I $LBM671/include -I $LBM671/include/lbm -L $LBM671/lib -l lbm $LI
 gcc -Wall -g -I $LBM671/include -I $LBM671/include/lbm -L $LBM671/lib -l lbm $LIBS \
     -o linux64_bin/gcsusrc verifymsg.c gcsusrc.c
 
-tar czf linux64_bin.tz linux64_bin
+gcc -Wall -g \
+    -o linux64_bin/gcsmdump gcsmdump.c
+
+gcc -Wall -g \
+    -o linux64_bin/gcsmsend gcsmsend.c
+
+gcc -Wall -g -l m \
+    -o linux64_bin/gcsmpong gcsmpong.c
+
+zip -qr linux64_bin.zip linux64_bin

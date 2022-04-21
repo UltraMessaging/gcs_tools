@@ -1,5 +1,5 @@
 /*
-"lbmmsrc.c: Send messages on multiple topics, optionally by multiple threads.
+"gcsmsrc.c: Send messages on multiple topics, optionally by multiple threads.
 "  Topic names generated as a root  followed by a dot, followed by an integer.
 "  By default, the first topic created will be '29west.example.multi.0'
 
