@@ -1,5 +1,8 @@
 /*
-  (C) Copyright 2005,2022 Informatica LLC  Permission is granted to licensees to use
+"umercv.c: application that receives messages from a given topic
+"  (single receiver). Understands UME.
+
+  Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
   or alter this software for any purpose, including commercial applications,
   according to the terms laid out in the Software License Agreement.
 
@@ -69,19 +72,12 @@
 		}while (0)
 #endif /* _WIN32 */
 
-/* Lines starting with double quote are extracted for UM documentation. */
-
-const char purpose[] = "Purpose: "
-"application that receives persisted messages from a given topic."
-;
-
-const char usage[] =
-"Usage: umercv [options] topic\n"
+const char Purpose[] = "Purpose: Receive messages on a single topic.";
+const char Usage[] =
+"Usage: %s [options] topic\n"
 "Available options:\n"
 "  -A, --ascii                 display messages as ASCII text (-A -A for newlines after each msg)\n"
-"  -c, --config=FILE           Use LBM configuration file FILE.\n"
-"                              Multiple config files are allowed.\n"
-"                              Example:  '-c file1.cfg -c file2.cfg'\n"
+"  -c, --config=FILE           use FILE as LBM configuration file\n"
 "  -D, --deregister=NUM        Deregister the receiver after receiving NUM messages\n"
 "  -E, --exit                  exit after source ends\n"
 "  -e, --explicit-ack=N        send an Explicit ACK every N messages\n"
@@ -100,9 +96,7 @@ const char usage[] =
 "  -v, --verbose               be verbose about incoming messages\n"
 "                              (-v -v = be even more verbose)\n"
 "  -V, --verify                verify message contents\n"
-"  -x, --no-exit-on-reg-error  don't exit on registration error (default is to exit)";
-
-const char monitor_usage[] =
+"  -x, --no-exit-on-reg-error  don't exit on registration error (default is to exit)\n"
 MONOPTS_RECEIVER
 MONMODULEOPTS_SENDER;
 
@@ -118,10 +112,10 @@ const char * OptionString = "Ac:D:Ee:hi:N:r:s:SU:u:vVx";
 #define OPTION_SESSION_ID 8
 const struct option OptionTable[] =
 {
-	{ "ascii",      no_argument,       NULL, 'A' },
-	{ "config",     required_argument, NULL, 'c' },
+	{ "ascii", no_argument, NULL, 'A' },
+	{ "config", required_argument, NULL, 'c' },
 	{ "deregister", required_argument, NULL, 'D' },
-	{ "exit",       no_argument,       NULL, 'E' },
+	{ "exit", no_argument, NULL, 'E' },
 	{ "explicit-ack", required_argument, NULL, 'e' },
 	{ "help", no_argument, NULL, 'h' },
 	{ "regid-offset", required_argument, NULL, 'i' },
@@ -160,6 +154,7 @@ struct Options {
 	int verbose;        /* Flag to control program verbosity */
 	int verify;         /* Flag to control message verification (verifymsg.h) */
 	int exit_on_reg_error; /* Flag to control whether app exits on registration error */
+	char conffname[256]; /* Configuration filename */
 
 	char transport_options_string[1024];    /* Transport options given to lbmmon_sctl_create() */
 	char format_options_string[1024];       /* Format options given to lbmmon_sctl_create()  */
@@ -174,6 +169,7 @@ struct Options {
 	int deregister;
 	char session_id[25];
 } options;
+
 
 #define DEFAULT_MAX_NUM_SRCS 10000
 #define DEFAULT_NUM_SRCS 10
@@ -191,9 +187,7 @@ unsigned long long total_byte_count = 0;
 #endif /* _WIN32 */
 int unrec_count = 0;
 int total_unrec_count = 0;
-int curr_sequence_number = 0;
 int burst_loss = 0;
-int total_burst_loss_count = 0;
 int close_recv = 0;
 struct timeval data_start_tv;
 struct timeval data_end_tv;
@@ -241,12 +235,11 @@ void print_bw(FILE *fp, struct timeval *tv, int msgs, int bytes, int unrec, lbm_
 		fprintf(fp, "%-5.4g secs.  %-5.4g %cmsgs/sec.  %-5.4g %cbps",
 				sec, mps, mgscale, bps, bscale);
 	if (lost != 0 || unrec != 0 || burst_loss != 0) {
-		fprintf(fp, " [%lu pkts lost, %u msgs unrecovered, %d bursts (%u msgs)]",
-			lost, unrec, burst_loss, total_burst_loss_count);
+		fprintf(fp, " [%lu pkts lost, %u msgs unrecovered, %d bursts]",
+				lost, unrec, burst_loss);
 	}
 	fprintf(fp, "\n");
 	burst_loss = 0;
-	total_burst_loss_count = 0;
 }
 
 /* Print transport statistics */
@@ -402,9 +395,8 @@ lbm_uint_t ume_rcv_regid_ex(lbm_ume_rcv_regid_ex_func_info_t *info, void *client
 	lbm_uint_t regid = info->src_registration_id + opts->regid_offset;
 
 	if (opts->verbose)
-		printf("Store %u: %s [%s][%u] Flags 0x%x. Requesting regid: %u (CD %p)\n", 
-				info->store_index, info->store, info->source,
-				info->src_registration_id, info->flags, regid, info->source_clientd);
+		printf("Store %u: %s [%s][%u] Flags %x. Requesting regid: %u (CD %p)\n", info->store_index, info->store, info->source,
+			info->src_registration_id, info->flags, regid, info->source_clientd);
 	return regid;
 }
 
@@ -414,11 +406,10 @@ int ume_rcv_seqnum_ex(lbm_ume_rcv_recovery_info_ex_func_info_t *info, void *clie
 	struct Options *opts = &options;
 	lbm_uint_t new_lo = info->low_sequence_number + opts->seqnum_offset;
 
-	printf("[%s] Low SQNs %u (will set to %u), Low rxreq max SQN %u, High SQN %u (CD %p) ", 
-			info->source, info->low_sequence_number, new_lo, 
-			info->low_rxreq_max_sequence_number, info->high_sequence_number, info->source_clientd);
+	printf("[%s] SQNs Low %x (will set to %x), Low rxreqmax %x, High %x (CD %p) ", info->source, info->low_sequence_number,
+		new_lo, info->low_rxreq_max_sequence_number, info->high_sequence_number, info->source_clientd);
 	if (info->flags & LBM_UME_RCV_RECOVERY_INFO_EX_FLAG_SRC_SID) {
-		printf("SRC Session ID %"PRIu64" ", info->src_session_id);
+		printf("Src Session ID 0x%" PRIx64 " ", info->src_session_id);
 	}
 	printf("\n");
 	info->low_sequence_number = new_lo;
@@ -451,7 +442,7 @@ int rcv_handle_immediate_msg(lbm_context_t *ctx, lbm_msg_t *msg, void *clientd)
 		}
 		if (opts->verbose) {
 			printf("IM [%s][%u], %lu bytes\n", msg->source,
-					msg->sequence_number, (unsigned long) msg->len);
+					msg->sequence_number, (unsigned long)msg->len);
 			if (opts->verbose > 1)
 				dump(msg->data, msg->len);
 		}
@@ -473,13 +464,13 @@ int rcv_handle_immediate_msg(lbm_context_t *ctx, lbm_msg_t *msg, void *clientd)
 		}
 		if (opts->verbose) {
 			printf("IM Request [%s][%u], %lu bytes\n", msg->source,
-					msg->sequence_number, (unsigned long) msg->len);
+					msg->sequence_number, (unsigned long)msg->len);
 			if (opts->verbose > 1)
 				dump(msg->data, msg->len);
 		}
 		break;
 	default:
-		printf( "Unhandled receiver event [%d] for immediate_msg from source [%s]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", msg->type, msg->source);
+		printf("Unknown immediate message lbm_msg_t type %x [%s]\n", msg->type, msg->source);
 		break;
 	}
 	/* LBM automatically deletes the lbm_msg_t object unless we retain it. */
@@ -530,7 +521,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		if (opts->verbose) {
  			printf("[%s][%s][%d]%s%s, %lu bytes\n", msg->topic_name, msg->source, msg->sequence_number,
 					((msg->flags & LBM_MSG_FLAG_UME_RETRANSMIT) ? "-RX-" : ""),
-					((msg->flags & LBM_MSG_FLAG_OTR) ? "-OTR-" : ""), (unsigned long) msg->len);
+					((msg->flags & LBM_MSG_FLAG_OTR) ? "-OTR-" : ""), (unsigned long)msg->len);
 			if (opts->verbose > 1)
 				dump(msg->data, msg->len);
 		}
@@ -538,11 +529,11 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 			int rc = verify_msg(msg->data, msg->len, opts->verbose);
 			if (rc == 0)
 			{
-				printf("Message SQN %u does not verify!\n", msg->sequence_number);
+				printf("Message sqn %x does not verify!\n", msg->sequence_number);
 			}
 			else if (rc == -1)
 			{
-				fprintf(stderr, "Message SQN %u is not a verifiable message.\n", msg->sequence_number);
+				fprintf(stderr, "Message sqn %x is not a verifiable message.\n", msg->sequence_number);
 				fprintf(stderr, "Use -V option on source and restart receiver.\n");
 				exit(1);
 			}
@@ -550,7 +541,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 			{
 				if (opts->verbose)
 				{
-					printf("Message SQN %u verifies\n", msg->sequence_number);
+					printf("Message sqn %x verifies\n", msg->sequence_number);
 				}
 			}
 		}
@@ -568,14 +559,13 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		unrec_count++;
 		total_unrec_count++;
 		if (opts->verbose) {
-			printf("[%s][%s][0x%x], LOST\n", msg->topic_name, msg->source, msg->sequence_number);
+			printf("[%s][%s][%x], LOST\n", msg->topic_name, msg->source, msg->sequence_number);
 		}
 		break;
 	case LBM_MSG_UNRECOVERABLE_LOSS_BURST:
 		burst_loss++;
-		total_burst_loss_count = msg->sequence_number - curr_sequence_number;
 		if (opts->verbose) {
-			printf("[%s][%s][0x%x], LOST BURST\n", msg->topic_name, msg->source, msg->sequence_number);
+			printf("[%s][%s][%x], LOST BURST\n", msg->topic_name, msg->source, msg->sequence_number);
 		}
 		break;
 	case LBM_MSG_REQUEST:
@@ -610,37 +600,44 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 			exit(0);
 		}
 		break;
+	case LBM_MSG_UME_REGISTRATION_SUCCESS:
+		{
+			lbm_msg_ume_registration_t *reg = (lbm_msg_ume_registration_t *)(msg->data);
+
+			printf("[%s][%s] UME registration successful. SrcRegID %u RcvRegID %u\n",
+					msg->topic_name, msg->source, reg->src_registration_id, reg->rcv_registration_id);
+		}
+		break;
 	case LBM_MSG_UME_REGISTRATION_SUCCESS_EX:
 		{
 			lbm_msg_ume_registration_ex_t *reg = (lbm_msg_ume_registration_ex_t *)(msg->data);
 
-			printf("[%s][%s] store %u: %s UME registration successful. SrcRegID %u RcvRegID %u. Flags 0x%x ",
+			printf("[%s][%s] store %u: %s UME registration successful. SrcRegID %u RcvRegID %u. Flags %x ",
 				msg->topic_name, msg->source, reg->store_index, reg->store,
 				reg->src_registration_id, reg->rcv_registration_id, reg->flags);
 			if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_OLD)
-				printf("OLD[SQN %u] ", reg->sequence_number);
+				printf("OLD[SQN %x] ", reg->sequence_number);
 			if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_NOCACHE)
 				printf("NOCACHE ");
-			if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_RPP) {
-				printf("RPP is %s ", ((reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_RPP_IS_NON_BLOCKING) ? "non-blocking" : "blocking"));
-			}
+			if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_RPP)
+				printf("RPP ");
 			if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_SRC_SID)
-				printf("SRC Session ID %"PRIu64" ", reg->src_session_id);
-			printf("Proactive keepalive %s supported at the store\n", ((reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_PROACTIVE_KEEPALIVE) ? "is" : "is not"));
+				printf("Src Session ID 0x%" PRIx64 " ", reg->src_session_id);
+			printf("\n");
 		}
 		break;
 	case LBM_MSG_UME_REGISTRATION_COMPLETE_EX:
 		{
 			lbm_msg_ume_registration_complete_ex_t *reg = (lbm_msg_ume_registration_complete_ex_t *)(msg->data);
 
-			printf("[%s][%s] UME registration complete. SQN %u. Flags 0x%x ",
+			printf("[%s][%s] UME registration complete. SQN %x. Flags %x ",
 				msg->topic_name, msg->source, reg->sequence_number, reg->flags);
 			if (reg->flags & LBM_MSG_UME_REGISTRATION_COMPLETE_EX_FLAG_QUORUM)
 				printf("QUORUM ");
 			if (reg->flags & LBM_MSG_UME_REGISTRATION_COMPLETE_EX_FLAG_RXREQMAX)
 				printf("RXREQMAX ");
 			if (reg->flags & LBM_MSG_UME_REGISTRATION_COMPLETE_EX_FLAG_SRC_SID)
-				printf("SRC Session ID %"PRIu64" ", reg->src_session_id);
+				printf("Src Session ID 0x%" PRIx64 " ", reg->src_session_id);
 			printf("\n");
 		}
 		break;
@@ -648,11 +645,11 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		{
 			lbm_msg_ume_deregistration_ex_t *dereg = (lbm_msg_ume_deregistration_ex_t *)(msg->data);
 
-			printf("[%s][%s] store %u: %s UME deregistration successful. SrcRegID %u RcvRegID %u. Flags 0x%x ",
+			printf("[%s][%s] store %u: %s UME deregistration successful. SrcRegID %u RcvRegID %u. Flags %x ",
 					msg->topic_name, msg->source, dereg->store_index, dereg->store,
 					dereg->src_registration_id, dereg->rcv_registration_id, dereg->flags);
 			if (dereg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_OLD)
-				printf("OLD[SQN %u] ", dereg->sequence_number);
+				printf("OLD[SQN %x] ", dereg->sequence_number);
 			if (dereg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_NOCACHE)
 				printf("NOCACHE ");
 			if (dereg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_RPP)
@@ -662,7 +659,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 	 	break;
 	case LBM_MSG_UME_DEREGISTRATION_COMPLETE_EX:
 		{
-			printf("[%s][%s] UME deregistration complete.\n",
+				printf("[%s][%s] UME deregistration complete.\n",
 					msg->topic_name, msg->source);
 		}
 		break;
@@ -670,10 +667,9 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		printf("[%s][%s] UME registration change: %s\n", msg->topic_name, msg->source, msg->data);
 		break;
 	default:
-		printf( "Unhandled receiver event [%d] from source [%s] with topic [%s]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", msg->type, msg->source, msg->topic_name);
+		printf("Unknown lbm_msg_t type %x [%s][%s]\n", msg->type, msg->topic_name, msg->source);
 		break;
 	}
-	curr_sequence_number = msg->sequence_number;
 	/* LBM automatically deletes the lbm_msg_t object unless we retain it. */
 	return 0;
 }
@@ -756,6 +752,7 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 	memset(opts, 0, sizeof(*opts));
 	opts->regid_offset = 1000;
 	opts->max_sources = DEFAULT_NUM_SRCS;
+	opts->conffname[0] = '\0';
 	opts->transport_options_string[0] = '\0';
 	opts->format_options_string[0] = '\0';
 	opts->application_id_string[0] = '\0';
@@ -773,11 +770,7 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 				opts->ascii++;
 				break;
 			case 'c':
-				/* Initialize configuration parameters from a file. */
-				if (lbm_config(optarg) == LBM_FAILURE) {
-					fprintf(stderr, "lbm_config: %s\n", lbm_errmsg());
-					exit(1);
-				}
+				strncpy(opts->conffname, optarg, sizeof(opts->conffname));
 				break;
 			case 'D':
 				opts->deregister = atoi(optarg);
@@ -789,8 +782,8 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 				opts->exack = atoi(optarg);
 				break;
 			case 'h':
-				fprintf(stderr, "%s\n%s\n%s\n%s\n%s",
-					argv[0], lbm_version(), purpose, usage, monitor_usage);
+				fprintf(stderr, "%s\n%s\n", lbm_version(), Purpose);
+				fprintf(stderr, Usage, argv[0]);
 				exit(0);
 			case 'i':
 				opts->regid_offset = atoi(optarg);
@@ -884,10 +877,6 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 					{
 						opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
 					}
-					else if (strcasecmp(optarg, "pb") == 0)
-					{
-						opts->format = (lbmmon_format_func_t *)lbmmon_format_pb_module();
-					}
 					else
 					{
 						++errflag;
@@ -927,8 +916,8 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 	if ((errflag != 0) || (optind == argc))
 	{
 		/* An error occurred processing the command line - dump the LBM version, usage and exit */
-		fprintf(stderr, "%s\n%s\n%s\n%s",
-			argv[0], lbm_version(), usage, monitor_usage);
+		fprintf(stderr, "%s\n", lbm_version());
+		fprintf(stderr, Usage, argv[0]);
 		exit(1);
 	}
 
@@ -994,6 +983,14 @@ int main(int argc, char **argv)
 	{
 		fprintf(stderr, "can't allocate statistics array\n");
 		exit(1);
+	}
+
+	/* Load LBM/UME configuration from file (if provided) */
+	if (opts->conffname[0] != '\0') {
+		if (lbm_config(opts->conffname) == LBM_FAILURE) {
+			fprintf(stderr, "lbm_config: %s\n", lbm_errmsg());
+			exit(1);
+		}
 	}
 
 	/* Initialize logging callback */
@@ -1147,9 +1144,9 @@ int main(int argc, char **argv)
 
 		if(sid != 0) {
 			/* Receiver-specific session IDs will override context-wide Session IDs, so if one is set, it will be used. */
-			printf("Using %"PRIu64" for RCV Session ID.  Any registration IDs specified will be ignored.\n", sid);
+			printf("Using 0x%"PRIx64" for receiver session ID.  Any registration IDs specified will be ignored.\n", sid);
 		} else if (ctx_sid != 0) {
-			printf("Using %"PRIu64" for CTX Session ID.  Any registration IDs specified will be ignored.\n", ctx_sid);
+			printf("Using 0x%"PRIx64" for context session ID.  Any registration IDs specified will be ignored.\n", ctx_sid);
 		} else if (opts->regid_offset != 0) {
 
 			/* If neither a context-wide Session ID nor a receiver Session ID are set, the application can pick a Registration

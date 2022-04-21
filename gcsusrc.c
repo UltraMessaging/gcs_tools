@@ -1,5 +1,8 @@
 /*
-  (C) Copyright 2005,2022 Informatica LLC  Permission is granted to licensees to use
+"umqsrc.c: application that sends to a given topic (single
+"  source) at a rate-limited pace. Understands UME.
+
+  Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
   or alter this software for any purpose, including commercial applications,
   according to the terms laid out in the Software License Agreement.
 
@@ -44,9 +47,20 @@
 	#include <sys/time.h>
 	#include <netdb.h>
 	#include <errno.h>
+#if 0
+	#if defined(__VMS)
+		#include ppl$routines
+	#elif defined(__TANDEM)
+		#include <sys/sem.h>
+	#else
+		#include <semaphore.h>
+		#ifdef __APPLE__
+			#include <libkern/OSAtomic.h>
+		#endif
+	#endif
+#endif
 	#if defined(__TANDEM)
 		#include <strings.h>
-		typedef int64_t intptr_t;
 	#endif
 #endif
 #include "replgetopt.h"
@@ -55,6 +69,7 @@
 #include "monmodopts.h"
 #include "verifymsg.h"
 #include "lbm-example-util.h"
+
 
 #define MIN_ALLOC_MSGLEN 25
 #define DEFAULT_MAX_MESSAGES 10000000
@@ -83,19 +98,11 @@ unsigned long appsent,stablerecv;
 		}while (0)
 #endif /* _WIN32 */
 
-/* Lines starting with double quote are extracted for UM documentation. */
-
-const char purpose[] = "Purpose: "
-"application that sends persisted messages to a given topic at a\n"
-"    specified rate."
-;
-
-const char usage[] =
-"Usage: umesrc [options] topic\n"
-"Available options:\n"
-"  -c, --config=FILE         Use LBM configuration file FILE.\n"
-"                            Multiple config files are allowed.\n"
-"                            Example:  '-c file1.cfg -c file2.cfg'\n"
+const char Purpose[] = "Purpose: Send messages on a single topic.";
+const char Usage[] =
+	"Usage: %s [options] topic\n"
+	"Available options:\n"
+"  -c, --config=FILE         use LBM configuration file FILE\n"
 "  -d, --delay=NUM           delay sending for NUM seconds after source creation\n"
 "  -D, --deregister			 deregister the source after sending messages\n"
 "  -h, --help                display this help and exit\n"
@@ -117,9 +124,7 @@ const char usage[] =
 "  -S, --store=IP            use specified UME store\n"
 "  -t, --storename=NAME      use specified UME store\n"
 "  -v, --verbose             print additional info in verbose form\n"
-"  -V, --verifiable          construct verifiable messages";
-
-const char monitor_usage[] =
+"  -V, --verifiable          construct verifiable messages\n"
 MONOPTS_SENDER
 MONMODULEOPTS_SENDER;
 
@@ -168,6 +173,7 @@ struct Options {
 	char transport_options_string[1024];/* Transport options given to lbmmon_sctl_create() */
 	char format_options_string[1024];	/* Format options given to lbmmon_sctl_create()	*/
 	char application_id_string[1024];	/* Application ID given to lbmmon_context_monitor() */
+	char conffname[256];				/* Configuration filename */
 	int delay,linger;					/* Interval to linger before and after sending messages */
 	int latejoin;						/* Flag to enable UME late join functionality */
 	size_t msglen;						/* Length of messages to be sent */
@@ -234,22 +240,20 @@ void print_bw(FILE *fp, struct timeval *tv, size_t msgs, unsigned long long byte
 void print_stats(FILE *fp, lbm_src_t *src)
 {
 	lbm_src_transport_stats_t stats;
-	int inflight = 0;
 
 	/* Retrieve source transport statistics */
 	if (lbm_src_retrieve_transport_stats(src, &stats) == LBM_FAILURE) {
 		fprintf(stderr, "lbm_src_retrieve_stats: %s\n", lbm_errmsg());
 		exit(1);
 	}
-	lbm_src_get_inflight(src, LBM_FLIGHT_SIZE_TYPE_UME, &inflight, NULL, NULL);
 	switch (stats.type) {
 	case LBM_TRANSPORT_STAT_TCP:
-		fprintf(fp, "TCP, buffered %lu, clients %lu, app sent %lu stable %lu inflight %d\n",stats.transport.tcp.bytes_buffered,
+		fprintf(fp, "TCP, buffered %lu, clients %lu, app sent %lu stable %lu inflight %lu\n",stats.transport.tcp.bytes_buffered,
 				stats.transport.tcp.num_clients,
-				appsent,stablerecv,inflight);
+				appsent,stablerecv,stablerecv > appsent ? stablerecv - appsent : appsent - stablerecv);
 		break;
 	case LBM_TRANSPORT_STAT_LBTRM:
-		fprintf(fp, "LBT-RM, sent %lu/%lu, txw %lu/%lu, naks %lu/%lu, ignored %lu/%lu, shed %lu, rxs %lu, rctlr %lu/%lu, app sent %lu stable %lu inflight %d\n",
+		fprintf(fp, "LBT-RM, sent %lu/%lu, txw %lu/%lu, naks %lu/%lu, ignored %lu/%lu, shed %lu, rxs %lu, rctlr %lu/%lu, app sent %lu stable %lu inflight %lu\n",
 				stats.transport.lbtrm.msgs_sent, stats.transport.lbtrm.bytes_sent,
 				stats.transport.lbtrm.txw_msgs, stats.transport.lbtrm.txw_bytes,
 				stats.transport.lbtrm.naks_rcved, stats.transport.lbtrm.nak_pckts_rcved,
@@ -257,29 +261,29 @@ void print_stats(FILE *fp, lbm_src_t *src)
 				stats.transport.lbtrm.naks_shed,
 				stats.transport.lbtrm.rxs_sent,
 				stats.transport.lbtrm.rctlr_data_msgs, stats.transport.lbtrm.rctlr_rx_msgs,
-				appsent,stablerecv,inflight);
+				appsent,stablerecv,stablerecv > appsent ? stablerecv - appsent : appsent - stablerecv);
 		break;
 	case LBM_TRANSPORT_STAT_LBTRU:
-		fprintf(fp, "LBT-RU, clients %lu, sent %lu/%lu, naks %lu/%lu, ignored %lu/%lu, shed %lu, rxs %lu app sent %lu stable %lu inflight %d\n",
+		fprintf(fp, "LBT-RU, clients %lu, sent %lu/%lu, naks %lu/%lu, ignored %lu/%lu, shed %lu, rxs %lu app sent %lu stable %lu inflight %lu\n",
 				stats.transport.lbtru.num_clients,
 				stats.transport.lbtru.msgs_sent, stats.transport.lbtru.bytes_sent,
 				stats.transport.lbtru.naks_rcved, stats.transport.lbtru.nak_pckts_rcved,
 				stats.transport.lbtru.naks_ignored, stats.transport.lbtru.naks_rx_delay_ignored,
 				stats.transport.lbtru.naks_shed,
 				stats.transport.lbtru.rxs_sent,
-				appsent,stablerecv,inflight);
+				appsent,stablerecv,stablerecv > appsent ? stablerecv - appsent : appsent - stablerecv);
 		break;
 	case LBM_TRANSPORT_STAT_LBTIPC:
-		fprintf(fp, "LBT-IPC, clients %lu, sent %lu/%lu, app sent %lu stable %lu inflight %d\n",
+		fprintf(fp, "LBT-IPC, clients %lu, sent %lu/%lu, app sent %lu stable %lu inflight %lu\n",
 				stats.transport.lbtipc.num_clients,
 				stats.transport.lbtipc.msgs_sent, stats.transport.lbtipc.bytes_sent,
-				appsent,stablerecv,inflight);
+				appsent,stablerecv,stablerecv > appsent ? stablerecv - appsent : appsent - stablerecv);
 		break;
 	case LBM_TRANSPORT_STAT_LBTRDMA:
-		fprintf(fp, "LBT-RDMA, clients %lu, sent %lu/%lu, app sent %lu stable %lu inflight %d\n",
+		fprintf(fp, "LBT-RDMA, clients %lu, sent %lu/%lu, app sent %lu stable %lu inflight %lu\n",
 				stats.transport.lbtrdma.num_clients,
 				stats.transport.lbtrdma.msgs_sent, stats.transport.lbtrdma.bytes_sent,
-				appsent,stablerecv,inflight);
+				appsent,stablerecv,stablerecv > appsent ? stablerecv - appsent : appsent - stablerecv);
 		break;
 	default:
 		break;
@@ -342,9 +346,9 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 			lbm_src_event_sequence_number_info_t *info = (lbm_src_event_sequence_number_info_t *)ed;
 
 			if (info->first_sequence_number != info->last_sequence_number) {
-				printf("SQN [%u,%u] (cd %p)\n", info->first_sequence_number, info->last_sequence_number, (char*)(info->msg_clientd) - 1);
+				printf("SQN [%x,%x] (cd %p)\n", info->first_sequence_number, info->last_sequence_number, (char*)(info->msg_clientd) - 1);
 			} else {
-				printf("SQN %u (cd %p)\n", info->last_sequence_number, (char*)(info->msg_clientd) - 1);
+				printf("SQN %x (cd %p)\n", info->last_sequence_number, (char*)(info->msg_clientd) - 1);
 			}
 		}
 		break;
@@ -355,13 +359,20 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 			printf("Error registering source with UME store: %s\n", errstr);
 		}
 		break;
+	case LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS:
+		{
+			lbm_src_event_ume_registration_t *reg = (lbm_src_event_ume_registration_t *)ed;
+
+			printf("UME store registration success. RegID %u\n", reg->registration_id);
+		}
+		break;
 	case LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX:
 		{
 			lbm_src_event_ume_registration_ex_t *reg = (lbm_src_event_ume_registration_ex_t *)ed;
 
-			printf("UME store %u: %s registration success. RegID %u. Flags 0x%x ", reg->store_index, reg->store, reg->registration_id, reg->flags);
+			printf("UME store %u: %s registration success. RegID %u. Flags %x ", reg->store_index, reg->store, reg->registration_id, reg->flags);
 			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX_FLAG_OLD)
-			 	printf("OLD[SQN %u] ", reg->sequence_number);
+				printf("OLD[SQN %x] ", reg->sequence_number);
 			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX_FLAG_NOACKS)
 				printf("NOACKS ");
 			printf("\n");
@@ -371,9 +382,9 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 		{
 			lbm_src_event_ume_registration_ex_t *reg = (lbm_src_event_ume_registration_ex_t *)ed;
 
-			printf("UME store %u: %s deregistration success. RegID %u. Flags 0x%x ", reg->store_index, reg->store, reg->registration_id, reg->flags);
+			printf("UME store %u: %s deregistration success. RegID %u. Flags %x ", reg->store_index, reg->store, reg->registration_id, reg->flags);
 			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX_FLAG_OLD)
-			 	printf("OLD[SQN %u] ", reg->sequence_number);
+				printf("OLD[SQN %x] ", reg->sequence_number);
 			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX_FLAG_NOACKS)
 				printf("NOACKS ");
 			printf("\n");
@@ -390,10 +401,21 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 
 			sleep_before_sending = 1000;
 
-			printf("UME registration complete. SQN %u. Flags 0x%x ", reg->sequence_number, reg->flags);
+			printf("UME registration complete. SQN %x. Flags %x ", reg->sequence_number, reg->flags);
 			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_COMPLETE_EX_FLAG_QUORUM)
 				printf("QUORUM ");
 			printf("\n");
+		}
+		break;
+	case LBM_SRC_EVENT_UME_MESSAGE_STABLE:
+		{
+			lbm_src_event_ume_ack_info_t *ackinfo = (lbm_src_event_ume_ack_info_t *)ed;
+
+			if (opts->verbose)
+				printf("UME message stable - sequence number %x (cd %p)\n", ackinfo->sequence_number, (char*)(ackinfo->msg_clientd) - 1);
+
+			/* Peg the counter for the received stable message */
+			stablerecv++;
 		}
 		break;
 	case LBM_SRC_EVENT_UME_MESSAGE_NOT_STABLE:
@@ -402,11 +424,11 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 
 			if (opts->verbose) {
 				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_NOT_STABLE_FLAG_STORE) {
-					printf("UME store %u: %s message NOT stable!! SQN %u (cd %p). Flags 0x%x ",
-             info->store_index, info->store, info->sequence_number, info->msg_clientd, info->flags);
+					printf("UME store %u: %s message NOT stable!! SQN %x (cd %p). Flags 0x%x ", info->store_index, info->store,
+							info->sequence_number, info->msg_clientd, info->flags);
 				} else {
- 			  printf( "UME message NOT stable!! SQN %u (cd %p). Flags 0x%x ",
-	        						info->sequence_number, info->msg_clientd, info->flags);
+					printf("UME message NOT stable!! SQN %x (cd %p). Flags 0x%x ",
+							info->sequence_number, info->msg_clientd, info->flags);
 				}
 				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_NOT_STABLE_FLAG_LOSS)
 					printf("LOSS");
@@ -422,11 +444,11 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 
 			if (opts->verbose) {
 				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_STORE) {
- 					printf("UME store %u: %s message stable. SQN %u (cd %p). Flags 0x%x ", 
-              info->store_index, info->store, info->sequence_number, info->msg_clientd, info->flags);
+					printf("UME store %u: %s message stable. SQN %x (cd %p). Flags 0x%x ", info->store_index, info->store,
+						info->sequence_number, info->msg_clientd, info->flags);
 				} else {
- 					printf("UME message stable. SQN %u (cd %p). Flags 0x%x ",
-						        info->sequence_number, info->msg_clientd, info->flags);
+					printf("UME message stable. SQN %x (cd %p). Flags 0x%x ",
+						info->sequence_number, info->msg_clientd, info->flags);
 				}
 				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_INTRAGROUP_STABLE)
 					printf("IA ");
@@ -448,13 +470,23 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 			}
 		}
 		break;
+	case LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION:
+		{
+			lbm_src_event_ume_ack_info_t *ackinfo = (lbm_src_event_ume_ack_info_t *)ed;
+
+			if (opts->verbose)
+				printf("UME delivery confirmation - sequence number %x, Rcv RegID %u (cd %p)\n",
+					ackinfo->sequence_number, ackinfo->rcv_registration_id, (char*)(ackinfo->msg_clientd) - 1);
+
+		}
+		break;
 	case LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX:
 		{
 			lbm_src_event_ume_ack_ex_info_t *info = (lbm_src_event_ume_ack_ex_info_t *)ed;
 
 			if (opts->verbose) {
- 				printf("UME delivery confirmation. SQN %u, RcvRegID %u (cd %p). Flags 0x%x ",
-					        info->sequence_number, info->rcv_registration_id, (char*)(info->msg_clientd) - 1, info->flags);
+				printf("UME delivery confirmation. SQN %x, RcvRegID %u (cd %p). Flags 0x%x ",
+					info->sequence_number, info->rcv_registration_id, (char*)(info->msg_clientd) - 1, info->flags);
 				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_UNIQUEACKS)
 					printf("UNIQUEACKS ");
 				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_UREGID)
@@ -474,16 +506,17 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 				lbm_src_event_ume_ack_info_t *ackinfo = (lbm_src_event_ume_ack_info_t *)ed;
 
 				if (opts->verbose)
- 					printf("UME message reclaimed - SQN %u (cd %p)\n",
-						        ackinfo->sequence_number, (char*)(ackinfo->msg_clientd) - 1);
+					printf("UME message reclaimed - sequence number %x (cd %p)\n",
+						ackinfo->sequence_number, (char*)(ackinfo->msg_clientd) - 1);
 			}
 			break;
 	case LBM_SRC_EVENT_UME_MESSAGE_RECLAIMED_EX:
 		{
 			lbm_src_event_ume_ack_ex_info_t *ackinfo = (lbm_src_event_ume_ack_ex_info_t *)ed;
+
 			if (opts->verbose) {
- 				printf("UME message reclaimed (ex) - SQN %u (cd %p). Flags 0x%x ",
-					        ackinfo->sequence_number, (char*)(ackinfo->msg_clientd) - 1, ackinfo->flags);
+				printf("UME message reclaimed (ex) - sequence number %x (cd %p). Flags 0x%x ",
+					ackinfo->sequence_number, (char*)(ackinfo->msg_clientd) - 1, ackinfo->flags);
 				if (ackinfo->flags & LBM_SRC_EVENT_UME_MESSAGE_RECLAIMED_EX_FLAG_FORCED) {
 					printf("FORCED");
 				}
@@ -524,7 +557,7 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 		}
 		break;
 	default:
-		printf( "Unhandled source event [%d]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", event);
+		printf("Unknown source event %d\n", event);
 		break;
 	}
 	fflush(stdout);
@@ -555,7 +588,7 @@ int handle_force_reclaim(const char *topic, lbm_uint_t sqn, void *clientd)
 	double secs = 0;
 
 	if (tsp == NULL) {
-		fprintf(stderr,"WARNING: source for topic \"%s\" forced reclaim 0x%x\n", topic, sqn);
+		fprintf(stderr,"WARNING: source for topic \"%s\" forced reclaim %x\n", topic, sqn);
 	} else {
 		current_tv(&endtv);
 		endtv.tv_sec -= tsp->tv_sec;
@@ -625,28 +658,28 @@ int check_ume_store_config(lbm_src_topic_attr_t *tattr, lbm_context_attr_t *catt
 
 	if(session_id != 0) {
 		/* per-source Session IDs override the context-level setting */
-   printf("Using source Session ID %"PRIu64".  Any per-store registration IDs specified will be ignored.\n", session_id);
+		printf("Using source Session ID 0x%" PRIx64 ".  Any per-store registration IDs specified will be ignored.\n", session_id); 
 	} else if (ctx_session_id != 0) {
-		 session_id = ctx_session_id;
-   printf("Using context Session ID %"PRIu64".  Any per-store registration IDs specified will be ignored.\n", ctx_session_id); 
+		session_id = ctx_session_id;
+		printf("Using context Session ID 0x%" PRIx64 ".  Any per-store registration IDs specified will be ignored.\n", ctx_session_id); 
 	}
 
 	if (opts->store_behavior == LBM_SRC_TOPIC_ATTR_UME_STORE_BEHAVIOR_QC) {
 		j = 0;
 		do {
 			if (num_grps > 0) {
-				printf("Group %lu: Size %u\n", (unsigned long) j, grps[j].group_size);
+				printf("Group %lu: Size %lu\n", (unsigned long)j, (unsigned long)grps[j].group_size);
 			} else if (num_grps == 0) {
-				printf("Group None: Number of Stores %lu\n", (unsigned long) num_stores);
+				printf("Group None: Number of Stores %lu\n", (unsigned long)num_stores);
 			}
 			for (i = 0; i < num_stores; i++) {
 				if (stores[i].group_index == j) {
 					if (stores[i].ip_address != 0) {
 						addr.s_addr = stores[i].ip_address;
-						printf(" Store %lu: %s:%u ", (unsigned long) i, inet_ntoa(addr), ntohs(stores[i].tcp_port));
+						printf(" Store %lu: %s:%u ", (unsigned long)i, inet_ntoa(addr), ntohs(stores[i].tcp_port));
 					}
 					else {
-						printf(" Store %lu: \"%s\" ", (unsigned long) i, store_names[i].name);
+						printf(" Store %lu: \"%s\" ", (unsigned long)i, store_names[i].name);
 					}
 					if (!session_id && stores[i].registration_id != 0)
 						printf("RegID %u ", stores[i].registration_id);
@@ -660,10 +693,10 @@ int check_ume_store_config(lbm_src_topic_attr_t *tattr, lbm_context_attr_t *catt
 			if (stores[i].group_index == j) {
 				if (stores[i].ip_address != 0) {
 					addr.s_addr = stores[i].ip_address;
-					printf(" Store %lu: %s:%u ", (unsigned long) i, inet_ntoa(addr), ntohs(stores[i].tcp_port));
+					printf(" Store %lu: %s:%u ", (unsigned long)i, inet_ntoa(addr), ntohs(stores[i].tcp_port));
 				}
 				else {
-					printf(" Store %lu: \"%s\" ", (unsigned long) i, store_names[i].name);
+					printf(" Store %lu: \"%s\" ", (unsigned long)i, store_names[i].name);
 				}
 				if (!session_id && stores[i].registration_id != 0)
 					printf("RegID %u ", stores[i].registration_id);
@@ -735,6 +768,7 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 	opts->msglen = MIN_ALLOC_MSGLEN;
 	opts->msgs = DEFAULT_MAX_MESSAGES;
 	opts->msgs_per_sec = DEFAULT_MSGS_PER_SEC;
+	opts->conffname[0] = '\0';
 	opts->storeip[0] = '\0';
 	opts->storeport[0] = '\0';
 	opts->transport_options_string[0] = '\0';
@@ -750,11 +784,7 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 		switch (c)
 		{
 			case 'c':
-				/* Initialize configuration parameters from a file. */
-				if (lbm_config(optarg) == LBM_FAILURE) {
-					fprintf(stderr, "lbm_config: %s\n", lbm_errmsg());
-					exit(1);
-				}
+				strncpy(opts->conffname, optarg, sizeof(opts->conffname));
 				break;
 			case 'd':
 				opts->delay = atoi(optarg);
@@ -784,8 +814,8 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 				opts->seqnum_info = 1;
 				break;
 			case 'h':
-				fprintf(stderr, "%s\n%s\n%s\n%s\n%s",
-					argv[0], lbm_version(), purpose, usage, monitor_usage);
+				fprintf(stderr, "%s\n%s\n", lbm_version(), Purpose);
+				fprintf(stderr, Usage, argv[0]);
 				exit(0);
 			case 'j':
 				opts->latejoin = 1;
@@ -862,10 +892,6 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 					{
 						opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
 					}
-					else if (strcasecmp(optarg, "pb") == 0)
-					{
-						opts->format = (lbmmon_format_func_t *)lbmmon_format_pb_module();
-					}
 					else
 					{
 						++errflag;
@@ -909,8 +935,8 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 	if ((errflag != 0) || (optind == argc))
 	{
 		/* An error occurred processing the command line - dump the LBM version, usage and exit */
-		fprintf(stderr, "%s\n%s\n%s\n%s",
-			argv[0], lbm_version(), usage, monitor_usage);
+		fprintf(stderr, "%s\n", lbm_version());
+		fprintf(stderr, Usage, argv[0]);
 		exit(1);
 	}
 
@@ -923,7 +949,7 @@ void *rcv_app_create(const ume_liveness_receiving_context_t *rcv, void *clientd)
 {
 	void *source_clientd = NULL;
 
-	fprintf(stdout, "Receiver detected: regid %"PRIu64", Session ID %"PRIu64"\n", rcv->regid, rcv->session_id);
+	fprintf(stdout, "Receiver detected: regid %"PRIu64", session_id 0x%"PRIx64"\n", rcv->regid, rcv->session_id);
 	fflush(stdout);
 	return source_clientd;
 }
@@ -931,7 +957,7 @@ void *rcv_app_create(const ume_liveness_receiving_context_t *rcv, void *clientd)
 /* Handle UMP liveness receiver lost */
 int rcv_app_delete(const ume_liveness_receiving_context_t *rcv, void *clientd, void *source_clientd)
 {
-  fprintf(stdout, "Receiver declared dead: regid %"PRIu64", Session ID %"PRIu64", reason ", rcv->regid, rcv->session_id);
+	fprintf(stdout, "Receiver declared dead: regid %"PRIu64", session_id 0x%"PRIx64", reason ", rcv->regid, rcv->session_id);
 	if (rcv->flag & LBM_UME_LIVENESS_RECEIVER_UNRESPONSIVE_FLAG_EOF) {
 		fprintf(stdout, "EOF\n");
 	} else if (rcv->flag & LBM_UME_LIVENESS_RECEIVER_UNRESPONSIVE_FLAG_TMO) {
@@ -996,6 +1022,14 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
+	/* Load LBM/UME configuration from file (if provided) */
+	if (opts->conffname[0] != '\0') {
+		if (lbm_config(opts->conffname) == LBM_FAILURE) {
+			fprintf(stderr, "lbm_config: %s\n", lbm_errmsg());
+			exit(1);
+		}
+	}
+
 	if (opts->msgs_per_sec != 0 && opts->pause_ivl != 0) {
 		fprintf(stderr, "-m and -P are conflicting options\n");
 		exit(1);
@@ -1005,8 +1039,8 @@ int main(int argc, char **argv)
 	if (opts->verifiable_msgs != 0) {
 		size_t min_msglen = minimum_verifiable_msglen();
 		if (opts->msglen < min_msglen) {
-			printf("Specified message length %lu is too small for verifiable messages.\n", (unsigned long) opts->msglen);
-			printf("Setting message length to minimum (%lu).\n", (unsigned long) min_msglen);
+			printf("Specified message length %lu is too small for verifiable messages.\n", (unsigned long)opts->msglen);
+			printf("Setting message length to minimum (%lu).\n", (unsigned long)min_msglen);
 			opts->msglen = min_msglen;
 		}
 	}
@@ -1018,7 +1052,7 @@ int main(int argc, char **argv)
 		message = malloc(opts->msglen);
 	}
 	if (message == NULL) {
-		fprintf(stderr, "could not allocate message buffer of size %lu bytes\n", (unsigned long) opts->msglen);
+		fprintf(stderr, "could not allocate message buffer of size %lu bytes\n",(unsigned long)opts->msglen);
 		exit(1);
 	}
 	memset(message, 0, opts->msglen);
@@ -1277,7 +1311,7 @@ int main(int argc, char **argv)
 		SLEEP_SEC(opts->delay);
 	}
 	printf("Sending %u messages of size %lu bytes to topic [%s]\n",
-		opts->msgs, (unsigned long) opts->msglen, opts->topic);
+		opts->msgs, (unsigned long)opts->msglen, opts->topic);
 	fflush(stdout);
 	
 	current_tv(&starttv);
@@ -1292,7 +1326,7 @@ int main(int argc, char **argv)
 			} else {
 				sprintf(message, "message %lu", count);
 			}
-			exinfo.ume_msg_clientd = (void *) ((intptr_t) ((lbm_uint_t)count + 1));
+			exinfo.ume_msg_clientd = (void *)((lbm_uint_t)count + 1);
 			last_clientd_sent = (lbm_uint_t)count + 1;
 			if (opts->seqnum_info) {
 				exinfo.flags |= LBM_SRC_SEND_EX_FLAG_SEQUENCE_NUMBER_INFO;
@@ -1356,7 +1390,7 @@ int main(int argc, char **argv)
 	normalize_tv(&endtv);
 	secs = (double)endtv.tv_sec + (double)endtv.tv_usec / 1000000.0;
 	printf("Sent %lu messages of size %lu bytes in %.04g seconds.\n",
-			count, (unsigned long) opts->msglen, secs);
+			count, (unsigned long)opts->msglen, secs);
 	print_bw(stdout, &endtv, (size_t) count, bytes_sent);
 	if (force_reclaim_total > 0)
 		printf("%d force reclamations\n", force_reclaim_total);

@@ -7,7 +7,7 @@
   modification, are permitted only as covered by the terms of a
   valid software license agreement with Informatica Corporation.
 
-  Copyright (C) 2004-2021, Informatica Corporation. All Rights Reserved.
+  Copyright (C) 2005,2022 Informatica Corporation. All Rights Reserved.
 
   THE SOFTWARE IS PROVIDED "AS IS" AND INFORMATICA DISCLAIMS ALL WARRANTIES
   EXPRESS OR IMPLIED, INCLUDING WITHOUT LIMITATION, ANY IMPLIED WARRANTIES OF

@@ -1,5 +1,8 @@
 /*
-  (C) Copyright 2005,2022 Informatica LLC  Permission is granted to licensees to use
+"lbmsrc.c: application that sends to a given topic (single
+"  source) as fast as it can.
+
+  Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
   or alter this software for any purpose, including commercial applications,
   according to the terms laid out in the Software License Agreement.
 
@@ -50,6 +53,7 @@
 #include "verifymsg.h"
 #include "lbm-example-util.h"
 
+
 #define MIN_ALLOC_MSGLEN 25
 #define DEFAULT_MAX_MESSAGES 10000000
 #define DEFAULT_DELAY_B4CLOSE 5
@@ -71,14 +75,9 @@
 		}while (0)
 #endif /* _WIN32 */
 
-/* Lines starting with double quote are extracted for UM documentation. */
-
-const char purpose[] = "Purpose: "
-"application that sends to a single topic as fast possible."
-;
-
-const char usage[] =
-"Usage: lbmsrc [options] topic\n"
+const char Purpose[] = "Purpose: Send messages on a single topic.";
+const char Usage[] =
+"Usage: %s [options] topic\n"
 "Available options:\n"
 "  -c, --config=FILE         Use LBM configuration file FILE.\n"
 "                            Multiple config files are allowed.\n"
@@ -98,12 +97,11 @@ const char usage[] =
 "                            k, m, and g suffixes may be used.  For example,\n"
 "                            '-R 1m/500k' is the same as '-R 1000000/500000'\n"
 "  -s, --statistics=NUM      print statistics every NUM seconds\n"
-"  -v, --verbose             be verbose about each message\n"
 "  -V, --verifiable          construct verifiable messages\n"
 MONOPTS_SENDER
 MONMODULEOPTS_SENDER;
 
-const char * OptionString = "c:d:j:hL:l:M:nN:P:R:s:vV";
+const char * OptionString = "c:d:j:hL:l:M:nN:P:R:s:V";
 #define OPTION_MONITOR_SRC 0
 #define OPTION_MONITOR_CTX 1
 #define OPTION_MONITOR_TRANSPORT 2
@@ -124,7 +122,6 @@ const struct option OptionTable[] =
 	{ "pause", required_argument, NULL, 'P' },
 	{ "rate", required_argument, NULL, 'R' },
 	{ "statistics", required_argument, NULL, 's' },
-	{ "verbose", no_argument, NULL, 'v' },
 	{ "verifiable", no_argument, NULL, 'V' },
 	{ "monitor-src", required_argument, NULL, OPTION_MONITOR_SRC },
 	{ "monitor-ctx", required_argument, NULL, OPTION_MONITOR_CTX },
@@ -137,33 +134,6 @@ const struct option OptionTable[] =
 	{ NULL, 0, NULL, 0 }
 };
 
-struct Options {
-	char transport_options_string[1024];	/* Transport Options given to lbmmon_sctl_create() */
-	char format_options_string[1024];		/* Format Options given to lbmmon_sctl_create() */
-	char application_id_string[1024];		/* Application ID given to lbmmon_context_monitor()	*/
-	unsigned int msgs;						/* Number of messages to be sent */
-	size_t msglen;							/* Length of messages to be sent */
-	unsigned long int latejoin_threshold; 	/* Maximum Late Join buffer size, in bytes */
-	int pause;								/* Pause interval between messages */
-	int delay, linger;					/* Interval to linger before and after sending messages	*/
-	int block;								/* Flag to control whether blocking sends are used	*/
-	lbm_uint64_t rm_rate;				/* Rate control values */
-	lbm_uint64_t rm_retrans;			/* Rate control values */
-	char rm_protocol;						/* Rate control protocol */
-	lbm_ulong_t stats_sec;					/* Interval for dumping statistics */
-	int verbose;							/* Flag to control output verbosity per message */
-	int verifiable_msgs;					/* Flag to control message verification (verifymsg.h) */
-	int monitor_context;					/* Flag to control context level monitoring */
-	int monitor_context_ivl;				/* Interval for context level monitoring */
-	int monitor_source;						/* Flag to control source level monitoring */
-	int monitor_source_ivl;					/* Interval for source level monitoring */
-	lbmmon_transport_func_t * transport;	/* Function pointer to chosen transport module */
-	lbmmon_format_func_t * format;			/* Function pointer to chosen format module */
-	char *topic;							/* The topic to be sent on */
-	long channel_number;					/* The channel (sub-topic) number to use */
-};
-
-#define TIME_FMT "%" PRIu64 ".%.9" PRIu64 " "
 int blocked = 0;
 
 /* For the elapsed time, calculate and print the msgs/sec and bits/sec */
@@ -250,8 +220,8 @@ void print_stats(FILE *fp, lbm_src_t *src)
 }
 
 void print_help_exit(char **argv, int exit_value){
-	fprintf(stderr, "%s\n%s\n%s\n%s",
-		argv[0], lbm_version(), purpose, usage);
+	fprintf(stderr, "%s\n%s\n", lbm_version(), Purpose);
+	fprintf(stderr, Usage, argv[0]);
 	exit(exit_value);
 }
 
@@ -290,19 +260,8 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 	case LBM_SRC_EVENT_WAKEUP:
 		blocked = 0;
 		break;
-	case LBM_SRC_EVENT_TIMESTAMP:
-		{
-			lbm_src_event_timestamp_info_t *info = (lbm_src_event_timestamp_info_t *)ed;
-			struct Options *opts = (struct Options *)cd;
-
-			if (opts->verbose) {
-				fprintf(stdout, "The timestamp of the transmitted packet was " TIME_FMT " for SQN %u\n", (uint64_t)info->hr_timestamp.tv_sec,
-					(uint64_t)info->hr_timestamp.tv_nsec, info->sequence_number);
-			}
-		}
-		break;
 	default:
-		printf( "Unhandled source event [%d]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", event);
+		printf("Unknown source event %d\n", event);
 		break;
 	}
 	return 0;
@@ -326,6 +285,31 @@ int handle_stats_timer(lbm_context_t *ctx, const void *clientd)
 	return 0;
 }
 
+struct Options {
+	char transport_options_string[1024];	/* Transport Options given to lbmmon_sctl_create() */
+	char format_options_string[1024];		/* Format Options given to lbmmon_sctl_create() */
+	char application_id_string[1024];		/* Application ID given to lbmmon_context_monitor()	*/
+	unsigned int msgs;						/* Number of messages to be sent */
+	size_t msglen;							/* Length of messages to be sent */
+	unsigned long int latejoin_threshold; 	/* Maximum Late Join buffer size, in bytes */
+	int pause;								/* Pause interval between messages */
+	int delay,linger;					/* Interval to linger before and after sending messages	*/
+	int block;								/* Flag to control whether blocking sends are used	*/
+	lbm_uint64_t rm_rate;				/* Rate control values */
+	lbm_uint64_t rm_retrans;			/* Rate control values */
+	char rm_protocol;						/* Rate control protocol */
+	lbm_ulong_t stats_sec;					/* Interval for dumping statistics */
+	int verifiable_msgs;				/* Flag to control message verification (verifymsg.h) */
+	int monitor_context;					/* Flag to control context level monitoring */
+	int monitor_context_ivl;				/* Interval for context level monitoring */
+	int monitor_source;						/* Flag to control source level monitoring */
+	int monitor_source_ivl;					/* Interval for source level monitoring */
+	lbmmon_transport_func_t * transport;	/* Function pointer to chosen transport module */
+	lbmmon_format_func_t * format;			/* Function pointer to chosen format module */
+	char *topic;							/* The topic to be sent on */
+	long channel_number;					/* The channel (sub-topic) number to use */
+};
+
 void process_cmdline(int argc, char **argv,struct Options *opts)
 {
 	int c,errflag = 0;
@@ -344,7 +328,8 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 	opts->rm_protocol = 'M';
 
 	/* Process the command line options, setting local variables with values */
-	while ((c = getopt_long(argc, argv, OptionString, OptionTable, NULL)) != EOF) {
+	while ((c = getopt_long(argc, argv, OptionString, OptionTable, NULL)) != EOF)
+	{
 		switch (c)
 		{
 			case 'c':
@@ -386,9 +371,6 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 				break;
 			case 's':
 				opts->stats_sec = atoi(optarg);
-				break;
-			case 'v':
-				opts->verbose = 1;
 				break;
 			case 'V':
 				opts->verifiable_msgs = 1;
@@ -443,10 +425,6 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 					{
 						opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
 					}
-					else if (strcasecmp(optarg, "pb") == 0)
-					{
-						opts->format = (lbmmon_format_func_t *)lbmmon_format_pb_module();
-					}
 					else
 					{
 						++errflag;
@@ -482,42 +460,12 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 				break;
 		}
 	}
-	if ((errflag != 0) || (optind == argc)) {
+	if ((errflag != 0) || (optind == argc))
+	{
 		/* An error occurred processing the command line - print help and exit */
 		print_help_exit(argv, 1); 		
 	}
 	opts->topic = argv[optind];
-}
-
-/*
- * Handler for immediate messages directed to NULL topic
- * callback is set as a parameter of lbm_context_rcv_immediate_msgs()
- */
-int handle_immediate_msg(lbm_context_t *ctx, lbm_msg_t *msg, void *clientd)
-{
-	struct Options *opts = (struct Options *) clientd;
-
-	switch (msg->type) {
-		case LBM_MSG_DATA:
-			/* Data message received */
-			if (opts->verbose) {
-				printf("IM Data [%s][%u], %lu bytes\n", msg->source, msg->sequence_number, (unsigned long) msg->len);
-			}
-		break;
-
-		case LBM_MSG_REQUEST:
-			/* Request message received (no response processed here) */
-			if (opts->verbose) {
-				printf("IM Request [%s][%u], %lu bytes\n", msg->source, msg->sequence_number, (unsigned long) msg->len);
-			}
-		break;
-
-		default:
-			printf( "Unhandled receiver event [%d] for immediate_msg from source [%s]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", msg->type, msg->source);
-		break;
-	}
-
-	return 0;
 }
 
 #if !defined(_WIN32)
@@ -580,13 +528,13 @@ int main(int argc, char **argv)
 	int count = 0;
 	unsigned long long bytes_sent = 0;
 	char *message = NULL;
-	void *message_SMX = NULL;	/* used to bypass message (avoid copy) */
+	void *message_SMX = NULL;	// used to bypass message (avoid copy)
 	lbmmon_sctl_t * monctl;
 	lbm_src_channel_info_t *chn = NULL;
 	lbm_src_send_ex_info_t info;
 	int err;
 
-	int transport;		/* transport in use (used for SMX testing) */
+	int transport;		// transport in use (used for SMX testing)
 	size_t transize = 4;
 	int smx_datagram_size = -1;
 	size_t smxdgssize = 4;
@@ -614,9 +562,11 @@ int main(int argc, char **argv)
 	process_cmdline(argc,argv,opts);
 
 	/* If set, check the requested message length is not too small */
-	if (opts->verifiable_msgs != 0) {
+	if (opts->verifiable_msgs != 0)
+	{
 		size_t min_msglen = minimum_verifiable_msglen();
-		if (opts->msglen < min_msglen) {
+		if (opts->msglen < min_msglen)
+		{
 			printf("Specified message length %u is too small for verifiable messages.\n", (unsigned) opts->msglen);
 			printf("Setting message length to minimum (%u).\n", (unsigned) min_msglen);
 			opts->msglen = min_msglen;
@@ -699,7 +649,8 @@ int main(int argc, char **argv)
  	}
 
 	/* If user specified a Late Join threshold, set the value in the context attribute structure */
-	if (opts->latejoin_threshold > 0) {
+	if (opts->latejoin_threshold > 0)
+	{
 		if (lbm_src_topic_attr_str_setopt(tattr, "late_join", "1") != 0) {
 			fprintf(stderr,"lbm_src_topic_attr_str_setopt:late_join: %s\n", lbm_errmsg());
 			exit(1);
@@ -712,19 +663,6 @@ int main(int argc, char **argv)
 
 		printf("Enabled Late Join with message retention threshold set to %lu bytes.\n", opts->latejoin_threshold);
 
-	}
-
-	{
-		lbm_context_rcv_immediate_msgs_func_t topicless_im_rcv_func;
-
-		topicless_im_rcv_func.clientd = opts;
-		topicless_im_rcv_func.evq = NULL;
-		topicless_im_rcv_func.func = handle_immediate_msg;
-		if (lbm_context_attr_setopt(cattr, "immediate_message_receiver_function",
-				&topicless_im_rcv_func, sizeof(topicless_im_rcv_func)) == LBM_FAILURE) {
-			fprintf(stderr, "lbm_context_rcv_immediate_msgs: %s\n", lbm_errmsg());
-			exit(1);
-		}
 	}
 
 	/* Create LBM context (passing in context attributes) */
@@ -759,7 +697,7 @@ int main(int argc, char **argv)
 	 * Create LBM source passing in the allocated topic and event
 	 * handler. The source object is returned here in &src.
 	 */
-	if (lbm_src_create(&src, ctx, topic, handle_src_event, opts, NULL) == LBM_FAILURE) {
+	if (lbm_src_create(&src, ctx, topic, handle_src_event, NULL, NULL) == LBM_FAILURE) {
 		fprintf(stderr, "lbm_src_create: %s\n", lbm_errmsg());
 		exit(1);
 	}
@@ -790,7 +728,8 @@ int main(int argc, char **argv)
 	}
 
 	/* If monitoring options were selected, setup lbmmon */
-	if (opts->monitor_context || opts->monitor_source) {
+	if (opts->monitor_context || opts->monitor_source)
+	{
 		char * transport_options = NULL;
 		char * format_options = NULL;
 		char * application_id = NULL;
@@ -799,30 +738,39 @@ int main(int argc, char **argv)
 		 * must be set to NULL or a valid value. Use local pointers to point
 		 * to the options array if a valid value was provided on the command line.
 		 */
-		if (strlen(opts->transport_options_string) > 0) {
+		if (strlen(opts->transport_options_string) > 0)
+		{
 			transport_options = opts->transport_options_string;
 		}
-		if (strlen(opts->format_options_string) > 0) {
+		if (strlen(opts->format_options_string) > 0)
+		{
 			format_options = opts->format_options_string;
 		}
-		if (strlen(opts->application_id_string) > 0) {
+		if (strlen(opts->application_id_string) > 0)
+		{
 			application_id = opts->application_id_string;
 		}
 
 		/* Create the source monitor controller based on requested options */
-		if (lbmmon_sctl_create(&monctl, opts->format, format_options, opts->transport, transport_options) == -1) {
+		if (lbmmon_sctl_create(&monctl, opts->format, format_options, opts->transport, transport_options) == -1)
+		{
 			fprintf(stderr, "lbmmon_sctl_create() failed, %s\n", lbmmon_errmsg());
 			exit(1);
 		}
 
 		/* Register the source/context for monitoring */
-		if (opts->monitor_context) {
-			if (lbmmon_context_monitor(monctl, ctx, application_id, opts->monitor_context_ivl) == -1) {
+		if (opts->monitor_context)
+		{
+			if (lbmmon_context_monitor(monctl, ctx, application_id, opts->monitor_context_ivl) == -1)
+			{
 				fprintf(stderr, "lbmmon_context_monitor() failed, %s\n", lbmmon_errmsg());
 				exit(1);
 			}
-		} else {
-			if (lbmmon_src_monitor(monctl, src, application_id, opts->monitor_source_ivl) == -1) {
+		}
+		else
+		{
+			if (lbmmon_src_monitor(monctl, src, application_id, opts->monitor_source_ivl) == -1)
+			{
 				fprintf(stderr, "lbmmon_src_monitor() failed, %s\n", lbmmon_errmsg());
 				exit(1);
 			}
@@ -838,7 +786,8 @@ int main(int argc, char **argv)
 		SLEEP_SEC(opts->delay);
 	}
 
-	if (opts->channel_number >= 0) {
+	if (opts->channel_number >= 0)
+	{
 		printf("Sending on channel %ld\n", opts->channel_number);
 		if(lbm_src_channel_create(&chn, src, opts->channel_number) != 0) {
 			fprintf(stderr, "lbm_src_channel_create: %s\n", lbm_errmsg());
@@ -861,18 +810,18 @@ int main(int argc, char **argv)
 				exit(1);
 			}
 
-			/* Create a dummy message to send */
-			if (opts->verifiable_msgs) {
-					construct_verifiable_msg((char *)message_SMX, opts->msglen);
+		/* Create a dummy message to send */
+		if (opts->verifiable_msgs) {
+				construct_verifiable_msg((char *)message_SMX, opts->msglen);
 			} else {
 				sprintf((char *)message_SMX, "message %u", count);
 			}
 		} else {
 			if (opts->verifiable_msgs) {
 			construct_verifiable_msg(message, opts->msglen);
-			} else {
-				sprintf(message, "message %u", count);
-			}
+		} else {
+			sprintf(message, "message %u", count);
+		}
 		}
 
 		/* Set the blocked flag to indicate we are blocked trying to send a message */
@@ -887,7 +836,8 @@ int main(int argc, char **argv)
 		else
 			err = lbm_src_send(src, message, opts->msglen, opts->block ? 0 : LBM_SRC_NONBLOCK);
 		if ( err == LBM_FAILURE) {
-			if (lbm_errnum() == LBM_EWOULDBLOCK) {
+			if (lbm_errnum() == LBM_EWOULDBLOCK)
+			{
 				/* The rate controller indicates to applications that the application is
 				 * exceeding the data rate by returning LBM_EWOULDBLOCK.
 				 * The application must wait for the WAKEUP event in the source event
@@ -895,7 +845,8 @@ int main(int argc, char **argv)
 				 * chooses to use global variable blocked between handle_src_event() and
 				 * the following loop to unblock transmission.
 				 */
-				while (blocked) {
+				while (blocked)
+				{
 					SLEEP_MSEC(100);
 				}
 				/*
@@ -904,7 +855,9 @@ int main(int argc, char **argv)
 				 * Simply reloop and send a new message.
 				 */
 				continue;
-			} else {
+			}
+			else
+			{
 				/* Unexpected error occurred */
 				fprintf(stderr, "lbm_src_send: %s\n", lbm_errmsg());
 				exit(1);
@@ -950,26 +903,34 @@ int main(int argc, char **argv)
 	}
 
 	/* If the user requested monitoring, unregister the monitors etc  */
-	if (opts->monitor_context || opts->monitor_source) {
-		if (opts->monitor_context) {
-			if (lbmmon_context_unmonitor(monctl, ctx) == -1) {
+	if (opts->monitor_context || opts->monitor_source)
+	{
+		if (opts->monitor_context)
+		{
+			if (lbmmon_context_unmonitor(monctl, ctx) == -1)
+			{
 				fprintf(stderr, "lbmmon_context_unmonitor() failed\n");
 				exit(1);
 			}
-		} else {
-			if (lbmmon_src_unmonitor(monctl, src) == -1) {
+		}
+		else
+		{
+			if (lbmmon_src_unmonitor(monctl, src) == -1)
+			{
 				fprintf(stderr, "lbmmon_src_unmonitor() failed\n");
 				exit(1);
 			}
 		}
-		if (lbmmon_sctl_destroy(monctl) == -1) {
+		if (lbmmon_sctl_destroy(monctl) == -1)
+		{
 			fprintf(stderr, "lbmmon_sctl_destoy() failed()\n");
 			exit(1);
 		}
 	}
 
-	if (opts->channel_number >= 0) {
-		if(lbm_src_channel_delete(chn) != 0) {
+	if (opts->channel_number >= 0)
+	{
+	if(lbm_src_channel_delete(chn) != 0) {
 			fprintf(stderr, "lbm_src_channel_delete: %s\n", lbm_errmsg());
 			exit(1);
 		}

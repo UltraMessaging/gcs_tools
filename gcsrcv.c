@@ -1,5 +1,8 @@
 /*
-  (C) Copyright 2005,2022 Informatica LLC  Permission is granted to licensees to use
+"lbmrcv.c: application that receives messages from a given topic
+"  (single receiver).
+
+  Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
   or alter this software for any purpose, including commercial applications,
   according to the terms laid out in the Software License Agreement.
 
@@ -51,6 +54,7 @@
 #include "replgetopt.h"
 #include "lbm-example-util.h"
 
+
 #if defined(_WIN32)
 #   define SLEEP_SEC(x) Sleep(x*1000)
 #   define SLEEP_MSEC(x) Sleep(x)
@@ -68,12 +72,7 @@
 		}while (0)
 #endif /* _WIN32 */
 
-/* Lines starting with double quote are extracted for UM documentation. */
-
-const char purpose[] = "Purpose: "
-"application that receives messages from a given topic."
-;
-
+const char purpose[] = "Purpose: Receive messages on a single topic.";
 const char usage[] =
 "Usage: lbmrcv [-ACEfhqsSvV] [-c filename] [-r msgs] [-U losslev] topic\n"
 "Available options:\n"
@@ -493,7 +492,7 @@ int rcv_handle_immediate_msg(lbm_context_t *ctx, lbm_msg_t *msg, void *clientd)
 
 		if (opts->verbose) {
 			printf("IM [%s][%u], %lu bytes\n",
-					msg->source, msg->sequence_number, (unsigned long) msg->len);
+					msg->source, msg->sequence_number, msg->len);
 			if (opts->verbose > 1)
 				dump(msg->data, msg->len);
 		}
@@ -516,13 +515,13 @@ int rcv_handle_immediate_msg(lbm_context_t *ctx, lbm_msg_t *msg, void *clientd)
 		}
 		if (opts->verbose) {
 			printf("IM Request [%s][%u], %lu bytes\n",
-					msg->source, msg->sequence_number, (unsigned long) msg->len);
+					msg->source, msg->sequence_number, msg->len);
 			if (opts->verbose > 1)
 				dump(msg->data, msg->len);
 		}
 		break;
 	default:
-		printf( "Unhandled receiver event [%d] for immediate_msg from source [%s]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", msg->type, msg->source);
+		printf("Unknown immediate message lbm_msg_t type %x [%s]\n", msg->type, msg->source);
 		break;
 	}
 	/* LBM automatically deletes the lbm_msg_t object unless we retain it. */
@@ -534,7 +533,6 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 {
 	static int lastseq = -1;
 	struct Options *opts = &options;
-	lbm_msg_properties_iter_t * iter;
 
 	if (close_recv)
 		return 0; /* skip any new messages if we're just waiting to exit */
@@ -546,60 +544,13 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		lastseq = msg->sequence_number;
 		
 		/* Data message received */
-		if (stotal_msg_count == 0) current_tv (&data_start_tv);
+		(stotal_msg_count == 0) ? current_tv (&data_start_tv) : current_tv(&data_end_tv);
 		msg_count++;
 		total_msg_count++;
 		stotal_msg_count++;
 		subtotal_msg_count++;
 		byte_count += msg->len;
 		total_byte_count += msg->len;
-
-		if (opts->verbose > 1 && msg->properties != NULL) {
-			if (lbm_msg_properties_iter_create(&iter) == LBM_FAILURE) {
-				fprintf(stderr, "lbm_msg_properties_iter_create: %s\n", lbm_errmsg());
-				exit(1);
-			}
-			if (lbm_msg_properties_iter_first(iter, msg->properties) == LBM_FAILURE) {
-				fprintf(stderr, "lbm_msg_properties_iter_first: %s\n", lbm_errmsg());
-				exit(1);
-			}
-			do {
-				printf("name[%s] type[%d] size[%lu]", iter->name, iter->type, (unsigned long)iter->size);
-				switch (iter->type) {
-				case LBM_MSG_PROPERTY_BOOLEAN:
-					printf(" data[%s]\n", *((lbm_uint8_t *)(iter->data)) ? "true" : "false");
-					break;
-				case LBM_MSG_PROPERTY_BYTE:
-					printf(" data[%"PRId8"]\n", *((lbm_uint8_t *)(iter->data)));
-					break;
-				case LBM_MSG_PROPERTY_SHORT:
-					printf(" data[%"PRId16"]\n", *((lbm_uint16_t *)(iter->data)));
-					break;
-				case LBM_MSG_PROPERTY_INT:
-					printf(" data[%"PRId32"]\n", *((lbm_uint32_t *)(iter->data)));
-					break;
-				case LBM_MSG_PROPERTY_LONG:
-					printf(" data[%"PRId64"]\n", *((lbm_uint64_t *)(iter->data)));
-					break;
-				case LBM_MSG_PROPERTY_FLOAT:
-					printf(" data[%f]\n", *((float *)(iter->data)));
-					break;
-				case LBM_MSG_PROPERTY_DOUBLE:
-					printf(" data[%f]\n", *((double *)(iter->data)));
-					break;
-				case LBM_MSG_PROPERTY_STRING:
-					printf(" data[%s]\n", iter->data);
-					break;
-				case LBM_MSG_PROPERTY_NONE:
-				default:
-					printf(" INVALID TYPE\n");
-				}
-			} while (lbm_msg_properties_iter_next(iter) != LBM_FAILURE);
-			if (lbm_msg_properties_iter_delete(iter) == LBM_FAILURE) {
-				fprintf(stderr, "lbm_msg_properties_iter_delete: %s\n", lbm_errmsg());
-				exit(1);
-			}
-		}
 
 		if (msg->flags & LBM_MSG_FLAG_RETRANSMIT)
 			rx_msg_count++;
@@ -622,11 +573,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		}
 		if (opts->verbose)
 		{
-			if (msg->hr_timestamp.tv_sec != 0) {
-				printf("HR[@%ld.%09ld]", (long int)msg->hr_timestamp.tv_sec, (long int)msg->hr_timestamp.tv_nsec);
-			} else {
-				printf("[@%ld.%06ld]", (long int)msg->tsp.tv_sec, (long int)msg->tsp.tv_usec);
-			}
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 			if(msg->channel_info != NULL) {
 				printf("[%s:%u][%s][%u]%s%s%s%s, %lu bytes\n",
 					msg->topic_name, msg->channel_info->channel_number,
@@ -635,7 +582,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 					((msg->flags & LBM_MSG_FLAG_HF_DUPLICATE) ? "-HFDUP-" : ""),
 					((msg->flags & LBM_MSG_FLAG_HF_PASS_THROUGH) ? "-PASS-" : ""),
 					((msg->flags & LBM_MSG_FLAG_OTR) ? "-OTR-" : ""),
-					(unsigned long) msg->len);
+					msg->len);
 			} else {
 				printf("[%s][%s][%u]%s%s%s%s, %lu bytes\n",
 					msg->topic_name, msg->source, msg->sequence_number,
@@ -643,7 +590,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 					((msg->flags & LBM_MSG_FLAG_HF_DUPLICATE) ? "-HFDUP-" : ""),
 					((msg->flags & LBM_MSG_FLAG_HF_PASS_THROUGH) ? "-PASS-" : ""),
 					((msg->flags & LBM_MSG_FLAG_OTR) ? "-OTR-" : ""),
-					(unsigned long) msg->len);
+					msg->len);
 			}
 
 			if (opts->verbose > 1)
@@ -724,7 +671,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		printf("[%s], no sources found for topic\n", msg->topic_name);
 		break;
 	default:
-		printf( "Unhandled receiver event [%d] from source[%s] with topic [%s]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", msg->type, msg->source, msg->topic_name);
+		printf("Unknown lbm_msg_t type %x [%s][%s]\n", msg->type, msg->topic_name, msg->source);
 		break;
 	}
 	if (check_optional_end_conditions()) {
@@ -742,9 +689,6 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 			close_recv = 1; /* so stop processing new messages until then */
 		}
 	}
-	if (close_recv == 1) {
-		current_tv(&data_end_tv);
-	}
 	/* LBM automatically deletes the lbm_msg_t object unless we retain it. */
 	return 0;
 }
@@ -755,7 +699,7 @@ int evq_monitor(lbm_event_queue_t *evq, int event, size_t evq_size,
 				lbm_ulong_t event_delay_usec, void *clientd)
 {
 	printf("event queue threshold exceeded - event %x, sz %lu, delay %lu\n",
-		   event, (unsigned long) evq_size, event_delay_usec);
+		   event, evq_size, event_delay_usec);
 	return 0;
 }
 
@@ -1048,10 +992,6 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 				if (strcasecmp(optarg, "csv") == 0)
 				{
 					opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
-				}
-				else if (strcasecmp(optarg, "pb") == 0)
-				{
-					opts->format = (lbmmon_format_func_t *)lbmmon_format_pb_module();
 				}
 				else
 				{

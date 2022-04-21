@@ -1,5 +1,8 @@
 /*
-  (C) Copyright 2005,2022 Informatica LLC  Permission is granted to licensees to use
+"lbmmrcv.c: application that receives messages from a set of topics
+"  (multiple receivers).
+
+  Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
   or alter this software for any purpose, including commercial applications,
   according to the terms laid out in the Software License Agreement.
 
@@ -53,8 +56,8 @@
 #include <lbm/lbm.h>
 #include <lbm/lbmmon.h>
 #include "monmodopts.h"
-#include "verifymsg.h"
 #include "lbm-example-util.h"
+
 
 #if defined(_WIN32)
 #   define SLEEP_SEC(x) Sleep((x)*1000)
@@ -73,14 +76,9 @@
 		}while (0)
 #endif /* _WIN32 */
 
-/* Lines starting with double quote are extracted for UM documentation. */
-
-const char purpose[] = "Purpose: "
-"application that receives messages from a set of one or more topics."
-;
-
-const char usage[] =
-"Usage: lbmmrcv [options]\n"
+const char Purpose[] = "Purpose: Receive messages on  multiple topics.";
+const char Usage[] =
+"Usage: %s [options]\n"
 "  -B, --bufsize=#          Set receive socket buffer size to # (in MB)\n"
 "  -c, --config=FILE        Use LBM configuration file FILE.\n"
 "                           Multiple config files are allowed.\n"
@@ -98,11 +96,10 @@ const char usage[] =
 "  -R, --receivers=NUM      create NUM receivers\n"
 "  -s, --statistics         print statistics along with bandwidth\n"
 "  -v, --verbose            be verbose\n"
-"  -V, --verify             verify message contents\n"
 MONOPTS_RECEIVER
 MONMODULEOPTS_SENDER;
 
-const char * OptionString = "B:c:C:Ee:hi:o:L:r:R:svV";
+const char * OptionString = "B:c:C:Ee:hi:o:L:r:R:sv";
 #define OPTION_MONITOR_RCV 0
 #define OPTION_MONITOR_CTX 1
 #define OPTION_MONITOR_TRANSPORT 2
@@ -124,7 +121,6 @@ const struct option OptionTable[] =
 	{ "receivers", required_argument, NULL, 'R' },
 	{ "statistics", no_argument, NULL, 's' },
 	{ "verbose", no_argument, NULL, 'v' },
-	{ "verify_msg", no_argument, NULL, 'V' },
 	{ "monitor-rcv", required_argument, NULL, OPTION_MONITOR_RCV },
 	{ "monitor-ctx", required_argument, NULL, OPTION_MONITOR_CTX },
 	{ "monitor-transport", required_argument, NULL, OPTION_MONITOR_TRANSPORT },
@@ -169,7 +165,6 @@ struct Options {
 	char topicroot[80];
 	char transport_options_string[1024];
 	int verbose;
-    int verify_msg;
 } options;
 
 lbm_event_queue_t *evq = NULL;
@@ -180,13 +175,11 @@ int byte_count = 0;
 int unrec_count = 0, total_unrec_count = 0;
 int close_recv = 0;
 int burst_loss = 0, total_burst_loss = 0;
-int rxs  = 0;
+int rxs = 0;
 int otrs = 0;
 lbm_ulong_t lost = 0, last_lost = 0;
 lbm_rcv_transport_stats_t * stats = NULL;
 int nstats = DEFAULT_NUM_SRCS;
-
-static void lbmmrcv_dump(const char *buffer, int size);
 
 /*
  * For the elapsed time, calculate and print the msgs/sec and bits/sec as well
@@ -372,47 +365,15 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		msg_count++;
 		total_msg_count++;
 		byte_count += msg->len;
-
-		if(msg->flags & LBM_MSG_FLAG_RETRANSMIT) 
-			rxs++;
-		if(msg->flags & LBM_MSG_FLAG_OTR) 
-			otrs++;
 		if (opts->verbose) {
-			if (msg->hr_timestamp.tv_sec != 0) {
-				printf("HR[@%ld.%09ld]", (long int)msg->hr_timestamp.tv_sec, (long int)msg->hr_timestamp.tv_nsec);
-			} else {
-				printf("[@%ld.%06ld]", (long int)msg->tsp.tv_sec, (long int)msg->tsp.tv_usec);
-			}
 			printf("[%s][%s][%u]%s%s, %u bytes\n",
 				   msg->topic_name, msg->source, msg->sequence_number,
 				   ((msg->flags & LBM_MSG_FLAG_RETRANSMIT) ? "-RX-" : ""),
 				   ((msg->flags & LBM_MSG_FLAG_OTR) ? "-OTR-" : ""),
 				   (unsigned int)msg->len);
-			if (opts->verbose > 1)
-				lbmmrcv_dump( msg->data, msg->len );
 		}
-		if (opts->verify_msg)
-		{
-			int rc = verify_msg(msg->data, msg->len, opts->verbose);
-			if (rc == 0)
-			{
-				printf("Message sqn %x does not verify!\n", msg->sequence_number);
-			}
-			else if (rc == -1)
-			{
-				fprintf(stderr, "Message sqn %x is not a verifiable message.\n", msg->sequence_number);
-				fprintf(stderr, "Use -V option on source and restart receiver.\n");
-				exit(1);
-			}
-			else
-			{
-				if (opts->verbose)
-				{
-					printf("Message sqn %x verifies\n", msg->sequence_number);
-				}
-			}
-		}
-
+		if(msg->flags & LBM_MSG_FLAG_RETRANSMIT) rxs++;
+		if(msg->flags & LBM_MSG_FLAG_OTR) otrs++;
 		break;
 	case LBM_MSG_BOS:
 			printf("[%s][%s], Beginning of Transport Session\n", msg->topic_name, msg->source);
@@ -455,34 +416,12 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 				   msg->topic_name, msg->source, msg->sequence_number);
 		}
 		break;
-	case LBM_MSG_UME_REGISTRATION_CHANGE:
-		if (opts->verbose) {
-			printf("[%s][%s] UME registration change: %s\n", msg->topic_name, msg->source, msg->data);
-			break;
-		}
 	case LBM_MSG_UME_REGISTRATION_SUCCESS_EX:
-		{
-			lbm_msg_ume_registration_ex_t *reg = (lbm_msg_ume_registration_ex_t *)(msg->data);
-
-			if (opts->verbose) {
-				printf("[%s][%s] store %u: %s UME registration successful. SrcRegID %u RcvRegID %u. Flags 0x%x ",
-					msg->topic_name, msg->source, reg->store_index, reg->store,
-					reg->src_registration_id, reg->rcv_registration_id, reg->flags);
-				if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_OLD)
-					printf("OLD[SQN %u] ", reg->sequence_number);
-				if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_NOCACHE)
-					printf("NOCACHE ");
-				if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_RPP) {
-					printf("RPP is %s ", ((reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_RPP_IS_NON_BLOCKING) ? "non-blocking" : "blocking"));
-				}
-				if (reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_SRC_SID)
-					printf("SRC Session ID %"PRIu64" ", reg->src_session_id);
-				printf("Proactive keepalive %s supported at the store\n", ((reg->flags & LBM_MSG_UME_REGISTRATION_SUCCESS_EX_FLAG_PROACTIVE_KEEPALIVE) ? "is" : "is not"));
-			}
-		}
+	case LBM_MSG_UME_REGISTRATION_COMPLETE_EX:
+		/* Provided to enable quiet usage of lbmstrm with UME */
 		break;
 	default:
-		printf( "Unhandled receiver event [%d] from source [%s]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", msg->type, msg->source);
+		printf("Unknown lbm_msg_t type %x [%s][%s]\n", msg->type, msg->topic_name, msg->source);
 		break;
 	}
 	/* LBM automatically deletes the lbm_msg_t object unless we retain it. */
@@ -593,8 +532,8 @@ void process_cmdline(int argc, char **argv) {
 				opts->regid_offset = atoi(optarg);
 				break;
 			case 'h':
-				fprintf(stderr, "%s\n%s\n%s\n%s",
-					argv[0], lbm_version(), purpose, usage);
+				fprintf(stderr, "%s\n%s\n", lbm_version(), Purpose);
+				fprintf(stderr, Usage, argv[0]);
 				exit(0);
 			case 'r':
 				strncpy(opts->topicroot, optarg, sizeof(opts->topicroot));
@@ -614,9 +553,6 @@ void process_cmdline(int argc, char **argv) {
 			case 'v':
 				opts->verbose++;
 				break;
-    		case 'V':
-	    		opts->verify_msg = 1;
-		    	break;
 			case OPTION_MONITOR_CTX:
 				opts->monitor_context = 1;
 				opts->monitor_context_ivl = atoi(optarg);
@@ -668,10 +604,6 @@ void process_cmdline(int argc, char **argv) {
 					{
 						opts->format = lbmmon_format_csv_module();
 					}
-					else if (strcasecmp(optarg, "pb") == 0)
-					{
-						opts->format = lbmmon_format_pb_module();
-					}
 					else
 					{
 						++errflag;
@@ -711,8 +643,8 @@ void process_cmdline(int argc, char **argv) {
 	}
 	if (errflag != 0)
 	{
-		fprintf(stderr, "%s\n%s\n%s",
-			argv[0], lbm_version(), usage);
+		fprintf(stderr, "%s\n", lbm_version());
+		fprintf(stderr, Usage, argv[0]);
 		exit(1);
 	}
 }
@@ -1094,47 +1026,5 @@ int main(int argc, char **argv)
 	}
 	printf("\n");
 	return 0;
-}
-
-
-
-/* Utility to print the contents of a buffer in hex/ASCII format */
-static void lbmmrcv_dump(const char *buffer, int size)
-{
-    
-	#define ROW_MID_POINT   7
-	#define END_OF_ROW     15
-	int blk_idx;
-	int cs_idx = 0;
-	char textver[20];
-
-    while(1)
-	{
-		printf( "%02x ", (unsigned char)buffer[cs_idx] );
-		textver[ cs_idx%16 ] = ( ( buffer[cs_idx] < 0x20 ) || ( buffer[cs_idx] > 0x7e ) ) ? '.' : buffer[cs_idx];
-		textver[ cs_idx%16 + 1 ] = 0;
-
-		if ( cs_idx + 1 >= size )
-		{
-			if ( cs_idx%16 <= ROW_MID_POINT ) {
-				printf("  " );
-			}
-        	printf(" ");
-	        for ( blk_idx = cs_idx%16; blk_idx < 16; blk_idx++ ) {
-		        printf( "   " );
-			}
-
-			printf("%s\n", textver );
-			break;
-		}
-		else if ( cs_idx%16 == ROW_MID_POINT ) {
-			printf("  " );
-		}
-		else if ( cs_idx%16 == END_OF_ROW ) {
-			printf( "    %s\n", textver );
-		}
-
-		cs_idx++;
-	}
 }
 

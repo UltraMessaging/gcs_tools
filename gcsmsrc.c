@@ -1,5 +1,9 @@
 /*
-  (C) Copyright 2005,2022 Informatica LLC  Permission is granted to licensees to use
+"lbmmsrc.c: Send messages on multiple topics, optionally by multiple threads.
+"  Topic names generated as a root  followed by a dot, followed by an integer.
+"  By default, the first topic created will be '29west.example.multi.0'
+
+  Copyright (c) 2005,2022 Informatica Corporation  Permission is granted to licensees to use
   or alter this software for any purpose, including commercial applications,
   according to the terms laid out in the Software License Agreement.
 
@@ -56,8 +60,8 @@
 #include <lbm/lbm.h>
 #include <lbm/lbmmon.h>
 #include "monmodopts.h"
-#include "verifymsg.h"
 #include "lbm-example-util.h"
+
 
 #if defined(_WIN32)
 #   define SLEEP_SEC(x) Sleep((x)*1000)
@@ -76,16 +80,11 @@
 		}while (0)
 #endif /* _WIN32 */
 
-/* Lines starting with double quote are extracted for UM documentation. */
-
-const char purpose[] = "Purpose: "
-"send messages on multiple topics, optionally by multiple threads.\n"
-"    Topic names generated as a root, a dot, and by an integer.\n"
-"    By default, the first topic created will be '29west.example.multi.0'"
-;
-
-const char usage[] =
-"Usage: lbmmsrc [options]\n"
+const char Purpose[] = "Purpose: Send messages on multiple topics, optionally by multiple threads.\n"
+							  "Topic names generated as a root  followed by a dot, followed by an integer.\n"
+							  "By default, the first topic created will be '29west.example.multi.0'";
+const char Usage[] =
+"Usage: %s [options]\n"
 "Available options:\n"
 "  -b, --batch=NUM           send messages in batch sizes of NUM between each pause\n"
 "  -c, --config=FILE         Use LBM configuration file FILE.\n"
@@ -109,11 +108,10 @@ const char usage[] =
 "  -S, --sources=NUM         use NUM sources\n"
 "  -T, --threads=NUM         use NUM threads\n"
 "  -v, --verbose             be verbose\n"
-"  -V, --verifiable_msg      construct verifiable messages \n"
 MONOPTS_SENDER
 MONMODULEOPTS_SENDER;
 
-const char * OptionString = "b:c:d:hi:j:l:L:M:P:r:R:s:S:T:vV";
+const char * OptionString = "b:c:d:hi:j:l:L:M:P:r:R:s:S:T:v";
 #define OPTION_MONITOR_SRC 0
 #define OPTION_MONITOR_CTX 1
 #define OPTION_MONITOR_TRANSPORT 2
@@ -139,7 +137,6 @@ const struct option OptionTable[] =
 	{ "sources", required_argument, NULL, 'S' },
 	{ "threads", required_argument, NULL, 'T' },
 	{ "verbose", no_argument, NULL, 'v' },
-	{ "verifiable_msg", no_argument, NULL, 'V' },
 	{ "monitor-src", required_argument, NULL, OPTION_MONITOR_SRC },
 	{ "monitor-ctx", required_argument, NULL, OPTION_MONITOR_CTX },
 	{ "monitor-transport", required_argument, NULL, OPTION_MONITOR_TRANSPORT },
@@ -164,8 +161,6 @@ const struct option OptionTable[] =
 /* global options */
 int verbose = 0;
 int delay = 1;
-int verifiable_msg = 0;
-int count = 0;
 
 /* Source event handler (passed into lbm_src_create()) */
 int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
@@ -195,90 +190,8 @@ int handle_src_event(lbm_src_t *src, int event, void *ed, void *cd)
 				printf("Receiver disconnect [%s]\n",clientname);
 		}
 		break;
-	case LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX:
-		{
-			lbm_src_event_ume_ack_ex_info_t *info = (lbm_src_event_ume_ack_ex_info_t *)ed;
-
-			if (verbose) {
-				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_STORE) {
-					printf("UME store %u: %s message stable. SQN %u (cd %p). Flags 0x%x ",
-						info->store_index, info->store, info->sequence_number, info->msg_clientd, info->flags);
-				} else {
-					printf("UME message stable. SQN %u (cd %p). Flags 0x%x ",
-						info->sequence_number, info->msg_clientd, info->flags);
-				}
-				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_INTRAGROUP_STABLE)
-					printf("IA ");
-				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_INTERGROUP_STABLE)
-					printf("IR ");
-				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_STABLE)
-					printf("STABLE ");
-				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_STORE)
-					printf("STORE ");
-				if (info->flags & LBM_SRC_EVENT_UME_MESSAGE_STABLE_EX_FLAG_WHOLE_MESSAGE_STABLE)
-					printf("MESSAGE");
-				printf("\n");
-			}
-		}
-		break;
-	case LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX:
-		{
-			lbm_src_event_ume_registration_ex_t *reg = (lbm_src_event_ume_registration_ex_t *)ed;
-
-			printf("UME store %u: %s registration success. RegID %u. Flags 0x%x ", reg->store_index, reg->store, reg->registration_id, reg->flags);
-			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX_FLAG_OLD)
-				printf("OLD[SQN %u] ", reg->sequence_number);
-			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_SUCCESS_EX_FLAG_NOACKS)
-				printf("NOACKS ");
-			printf("\n");
-		}
-		break;
-	case LBM_SRC_EVENT_UME_REGISTRATION_COMPLETE_EX:
-		{
-			lbm_src_event_ume_registration_complete_ex_t *reg = (lbm_src_event_ume_registration_complete_ex_t *)ed;
-
-			printf("UME registration complete. SQN %u. Flags 0x%x ", reg->sequence_number, reg->flags);
-			if (reg->flags & LBM_SRC_EVENT_UME_REGISTRATION_COMPLETE_EX_FLAG_QUORUM)
-				printf("QUORUM ");
-			printf("\n");
-		}
-		break;
-	case LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX:
-		{
-			lbm_src_event_ume_ack_ex_info_t *info = (lbm_src_event_ume_ack_ex_info_t *)ed;
-
-			if (verbose) {
-				printf("UME delivery confirmation. SQN %u, RcvRegID %u. Flags 0x%x ",
-					info->sequence_number, info->rcv_registration_id, info->flags);
-				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_UNIQUEACKS)
-					printf("UNIQUEACKS ");
-				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_UREGID)
-					printf("UREGID ");
-				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_OOD)
-					printf("OOD ");
-				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_EXACK)
-					printf("EXACK ");
-				if (info->flags & LBM_SRC_EVENT_UME_DELIVERY_CONFIRMATION_EX_FLAG_WHOLE_MESSAGE_CONFIRMED)
-					printf("MESSAGE");
-				printf("\n");
-			}
-		}
-		break;
-	case LBM_SRC_EVENT_TIMESTAMP:
-		{
-			lbm_src_event_timestamp_info_t *info = (lbm_src_event_timestamp_info_t *)ed;
-
-			if ( verbose ){
-				fprintf(stdout, "Transmitted packet timestamp : %"PRIu64".%.9"PRIu64" SQN : %u \n", 
-								(uint64_t)info->hr_timestamp.tv_sec,
-								(uint64_t)info->hr_timestamp.tv_nsec,
-								(unsigned int)info->sequence_number );
-			}
-		}
-		break;
-
 	default:
-		printf( "Unhandled source event [%d]. Refer to https://ultramessaging.github.io/currdoc/doc/example/index.html#unhandledcevents for a detailed description.\n", event);
+		printf("Unknown source event %d\n", event);
 		break;
 	}
 	return 0;
@@ -405,7 +318,7 @@ void *sending_thread_main(void *arg)
 		message = malloc(msglen);
 	}
 	if (message == NULL) {
-		fprintf(stderr, "could not allocate message buffer of size %lu bytes\n", (unsigned long) msglen);
+		fprintf(stderr, "could not allocate message buffer of size %u bytes\n",(unsigned int)msglen);
 		exit(1);
 	}
 	memset(message, 0, msglen);
@@ -416,11 +329,6 @@ void *sending_thread_main(void *arg)
 	 */
 	while (msgsleft[thrdidx] > 0) {
 		for (i = thrdidx; i < num_srcs; i += num_thrds) {
-           	if (verifiable_msg)
-				construct_verifiable_msg( message, msglen );
-			else{
-				sprintf(message, "message %u", count );
-			}
 			if (lbm_src_send(srcs[i], message, msglen, 0) == LBM_FAILURE) {
 				fprintf(stderr, "lbm_src_send: %s\n", lbm_errmsg());
 				exit(1);
@@ -433,7 +341,6 @@ void *sending_thread_main(void *arg)
 				SLEEP_MSEC(msecpause);
 			}
 		}
-        count++;
 	}
 	free(message);
 #if defined(_WIN32)
@@ -546,8 +453,8 @@ int main(int argc, char **argv)
 				totalmsgsleft = atoi(optarg);
 				break;
 			case 'h':
-				fprintf(stderr, "%s\n%s\n%s\n%s",
-					argv[0], lbm_version(), purpose, usage);
+				fprintf(stderr, "%s\n%s\n", lbm_version(), Purpose);
+				fprintf(stderr, Usage, argv[0]);
 				exit(0);
 			case 'P':
 				msecpause = atoi(optarg);
@@ -584,9 +491,6 @@ int main(int argc, char **argv)
 			case 'v':
 				verbose++;
 				break;
-            case 'V':
-                verifiable_msg = 1;
-                break;
 			case OPTION_MONITOR_TRANSPORT:
 				if (optarg != NULL)
 				{
@@ -629,10 +533,6 @@ int main(int argc, char **argv)
 					{
 						format = lbmmon_format_csv_module();
 					}
-					else if (strcasecmp(optarg, "pb") == 0)
-					{
-						format = lbmmon_format_pb_module();
-					}
 					else
 					{
 						++errflag;
@@ -668,20 +568,10 @@ int main(int argc, char **argv)
 				break;
 		}
 	}
-	/* If set, check the requested message length is not too small */
-	if ( verifiable_msg != 0 ) {
-		size_t min_msglen = minimum_verifiable_msglen();
-		if ( msglen < min_msglen ) {
-			printf("Specified message length %u is too small for verifiable messages.\n", (unsigned) msglen);
-			printf("Setting message length to minimum (%u).\n", (unsigned) min_msglen);
-			msglen = min_msglen;
-		}
-	}
-
 	if (errflag != 0)
 	{
-		fprintf(stderr, "%s\n%s\n%s",
-			argv[0], lbm_version(), usage);
+		fprintf(stderr, "%s\n", lbm_version());
+		fprintf(stderr, Usage, argv[0]);
 		exit(1);
 	}
 	if (num_thrds > num_srcs) {
@@ -821,9 +711,6 @@ int main(int argc, char **argv)
 			fprintf(stderr, "lbm_src_create: %s\n", lbm_errmsg());
 			exit(1);
 		}
-		if (verbose) {
-			printf("Created source %d on topic: %s\n", i, topicname);
-		}
 		if (monitor_source)
 		{
 			char appid[1024];
@@ -851,8 +738,8 @@ int main(int argc, char **argv)
 	}
 	printf("Created %d Sources. Will start sending data now.\n",num_srcs);
 
-	printf("Using %d threads to send %u messages of size %lu bytes (%u messages per thread).\n",
-		   num_thrds, totalmsgsleft, (unsigned long) msglen, totalmsgsleft / num_thrds);
+	printf("Using %d threads to send %u messages of size %u bytes (%u messages per thread).\n",
+		   num_thrds, totalmsgsleft, (unsigned int)msglen, totalmsgsleft / num_thrds);
 
 	/* Divide sending load amongst available threads */
 	for (i = 1; i < num_thrds; i++) {
@@ -948,7 +835,6 @@ int main(int argc, char **argv)
 		if (i > 1 && (i % 1000) == 0)
 			printf("Deleted %d sources\n",i);
 	}
-	printf("Deleted %d sources\n", i);
 	lbm_context_delete(ctx);
 	ctx = NULL;
 

@@ -1,9 +1,12 @@
 # gcs_tools
 
-A snapshot of some UM example applications (originally from UM version 6.14)
-with modifications that are useful to the Global Customer Support organization
-(GCS).
-These modifications assist in supporting our customers.
+These tools are intended for use by UM customers for troubleshooting
+under the direction of the UM support team.
+The source code is being made available publically for the sake of
+transparancy,
+but Informatica recommends
+[UMExamples](https://ultramessaging.github.io/UMExamples/)
+for better instructional example code.
 
 # Table of contents
 
@@ -45,39 +48,17 @@ See https://github.com/UltraMessaging/gcs_tools for code and documentation.
 ## INTRODUCTION
 
 Many of the tools in this repository were cloned from example source files
-of the same name (UM version 6.14).
-They were copied because the support team requires changes to the tools that
-are not appropriate for the example applications,
-so we did not make the changes to the product examples.
+from UMP version 6.7.1.
+They are built against UM version 6.7.1 libraries,
+but they can be executed with any version of UM beyond 6.7.1.
 
-### ENVIRONMENT
+General users should contact UM Support for advice on how to use these
+tools for troubleshooting.
 
-The commands and scripts in this repository assume four environment
-variables are set up: LBM_LICENSE_INFO, LBM, and LD_LIBRARY_PATH.
+Note that the binaries for these tools are also available as zip files
+by platform (64-bit Linux and 64-bit Windows only).
 
-Here's an example of setting them up:
-````
-export LD_LIBRARY_PATH LBM_LICENSE_INFO LBM
-LBM_LICENSE_INFO="Product=LBM,UME,UMQ,UMDRO:Organization=UM RnD sford (RnD):Expiration-Date=never:License-Key=xxxx xxxx xxxx xxxx"
-# Path to the install directory for the UM platform.
-LBM="/home/sford/UMP_6.14/Linux-glibc-2.17-x86_64"
-LD_LIBRARY_PATH="$LBM/lib"
-````
+### BUILDING TEST TOOLS
 
-### BUILD TEST TOOLS
-
-The "bld.sh" script can be used to build the tools on Linux.
-It relies on the "LD_LIBRARY_PATH" and "LBM"
-[environment variables](#environment).
-
-### BINARIES
-
-We have pre-built 64-bit executables for Linux,
-built with UM 6.14, in the file "linux64_bin.tz".
-These can be extracted via:
-````
-tar xzf linux64_bin.tz
-````
-This will create the directory linux64_bin containing the executables.
-
-If you have an older version of UM, you will need to rebuild the tools.
+Informatica employees should refer to
+[the internal wiki](http://waki.29west.com/mediawiki/index.php?title=GCS_Tools) for information.

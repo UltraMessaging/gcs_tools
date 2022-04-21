@@ -8,11 +8,6 @@ tmp.*
 lbm.sh
 
 # Executable
-lbmmrcv
-lbmmsrc
-lbmrcv
-lbmsrc
-lbmssrc
 
 # Prerequisites
 *.d
