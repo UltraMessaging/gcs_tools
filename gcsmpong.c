@@ -183,6 +183,9 @@ int main(int argc, char **argv)
 	struct sockaddr_in in_sa;
 	struct sockaddr_in out_sa;
 	struct sockaddr_in src;
+#if defined(_WIN32)
+    unsigned int wttl;
+#endif /* _WIN32 */
 	struct ip_mreq imr;
 	struct timeval first_tv;
 	struct timeval start_tv;

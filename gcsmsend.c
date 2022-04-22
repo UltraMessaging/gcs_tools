@@ -154,6 +154,9 @@ int main(int argc, char **argv)
 	char cmdbuf[512];
 	SOCKET sock;
 	struct sockaddr_in sin;
+#if defined(_WIN32)
+    unsigned int wttl;
+#endif /* _WIN32 */
 	int burst_num;  /* number of bursts so far */
 	int msg_num;  /* number of messages so far */
 	int send_len;  /* size of datagram to send */
