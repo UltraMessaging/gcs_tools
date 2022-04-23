@@ -3,4 +3,5 @@
 
 cd ../Documents/Visual\ Studio\ 2012/Projects/
 rm -rf `find gcs_tools -name 'Debug' -print`
+rm -f `find gcs_tools -name '*.sdf' -print`
 tar -czf ../../../gcs_tools/gcs_tools-solution-backup.tz gcs_tools
