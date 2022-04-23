@@ -8,4 +8,4 @@ cp ../Documents/Visual\ Studio\ 2012/Projects/gcs_tools/x64/Debug/*.exe win64_bi
 zip -qr win64_bin.zip win64_bin
 
 cd ../Documents/Visual\ Studio\ 2012/Projects/
-tar -czf ../../../gcs_tools/gcs_tools-solution-backup.gz gcs_tools
+tar -czf ../../../gcs_tools/gcs_tools-solution-backup.tz gcs_tools
