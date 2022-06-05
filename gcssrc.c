@@ -139,7 +139,7 @@ int blocked = 0;
 /* For the elapsed time, calculate and print the msgs/sec and bits/sec */
 void print_bw(FILE *fp, struct timeval *tv, unsigned int msgs, unsigned long long bytes)
 {
-	char scale[] = {'\0', 'K', 'M', 'G'};
+	char scale[] = {' ', 'K', 'M', 'G'};
 	int msg_scale_index = 0, bit_scale_index = 0;
 	double sec = 0.0, mps = 0.0, bps = 0.0;
 	double kscale = 1000.0;
