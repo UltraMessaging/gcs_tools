@@ -125,17 +125,11 @@ const char Usage[] =
 "  -t, --storename=NAME      use specified UME store\n"
 "  -v, --verbose             print additional info in verbose form\n"
 "  -V, --verifiable          construct verifiable messages\n"
-MONOPTS_SENDER
-MONMODULEOPTS_SENDER;
+"  -X, --xml-config=FILE     Use UM XML configuration FILE\n"
+"  -Y, --xml-appname=APP     Use UM XML APP application name\n"
+;
 
-const char * OptionString = "c:d:Df:hI:jL:l:M:m:NnP:R:s:S:t:vV";
-#define OPTION_MONITOR_SRC 0
-#define OPTION_MONITOR_CTX 1
-#define OPTION_MONITOR_TRANSPORT 2
-#define OPTION_MONITOR_TRANSPORT_OPTS 3
-#define OPTION_MONITOR_FORMAT 4
-#define OPTION_MONITOR_FORMAT_OPTS 5
-#define OPTION_MONITOR_APPID 6
+const char * OptionString = "c:d:Df:hI:jL:l:M:m:NnP:R:s:S:t:vVX:Y:";
 const struct option OptionTable[] =
 {
 	{ "config", required_argument, NULL, 'c' },
@@ -157,24 +151,16 @@ const struct option OptionTable[] =
 	{ "storename", required_argument, NULL, 't' },
 	{ "verbose", no_argument, NULL, 'v' },
 	{ "verifiable", no_argument, NULL, 'V' },
-	{ "monitor-src", required_argument, NULL, OPTION_MONITOR_SRC },
-	{ "monitor-ctx", required_argument, NULL, OPTION_MONITOR_CTX },
-	{ "monitor-transport", required_argument, NULL, OPTION_MONITOR_TRANSPORT },
-	{ "monitor-transport-opts", required_argument, NULL, OPTION_MONITOR_TRANSPORT_OPTS },
-	{ "monitor-format", required_argument, NULL, OPTION_MONITOR_FORMAT },
-	{ "monitor-format-opts", required_argument, NULL, OPTION_MONITOR_FORMAT_OPTS },
-	{ "monitor-appid", required_argument, NULL, OPTION_MONITOR_APPID },
+	{ "xml-config", required_argument, NULL, 'X' },
+	{ "xml-appname", required_argument, NULL, 'Y' },
 	{ NULL, 0, NULL, 0 }
 };
 
 struct Options {
-	int flightsz;						/* number of messages per "flight" */
+	int flightsz;				/* number of messages per "flight" */
 
-	char transport_options_string[1024];/* Transport options given to lbmmon_sctl_create() */
-	char format_options_string[1024];	/* Format options given to lbmmon_sctl_create()	*/
-	char application_id_string[1024];	/* Application ID given to lbmmon_context_monitor() */
-	char conffname[256];				/* Configuration filename */
-	int delay,linger;					/* Interval to linger before and after sending messages */
+	char conffname[256];			/* Configuration filename */
+	int delay,linger;			/* Interval to linger before and after sending messages */
 	int latejoin;						/* Flag to enable UME late join functionality */
 	size_t msglen;						/* Length of messages to be sent */
 	unsigned int msgs;					/* Number of messages to be sent */
@@ -190,18 +176,13 @@ struct Options {
 
 	int verbose;						/* Flag to control program verbosity */
 	int verifiable_msgs;				/* Flag to control message verification (verifymsg.h) */
-	int monitor_context;				/* Flag to control context level monitoring	*/
-	int monitor_context_ivl;			/* Interval for context level monitoring */
-	int monitor_source;			 		/* Flag to control source level monitoring */
-	unsigned int monitor_source_ivl;	/* Interval for source level monitoring */
-
-	lbmmon_transport_func_t * transport;/* Function pointer to chosen transport module */
-	lbmmon_format_func_t * format;		/* Function pointer to chosen format module	 */
 
 	char *topic;						/* The topic on which messages will be sent	 */
 	int store_behavior; 				/* UME store behavior - set in config file */
 	char storename[256]; 				/* The store name */
 	int deregister;
+	char xml_config[256];	      /* XML Configuration file */
+	char xml_appname[256];	      /* Application name reference in the XML file */
 } options;
 
 int blocked = 0;
@@ -771,11 +752,6 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 	opts->conffname[0] = '\0';
 	opts->storeip[0] = '\0';
 	opts->storeport[0] = '\0';
-	opts->transport_options_string[0] = '\0';
-	opts->format_options_string[0] = '\0';
-	opts->application_id_string[0] = '\0';
-	opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_lbm_module();
-	opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
 	opts->deregister = 0;
 
 	/* Process the command line options, setting local variables with values */
@@ -842,84 +818,20 @@ void process_cmdline(int argc, char **argv,struct Options *opts)
 			case 'V':
 				opts->verifiable_msgs = 1;
 				break;
-			case OPTION_MONITOR_SRC:
-				opts->monitor_source = 1;
-				opts->monitor_source_ivl = atoi(optarg);
-				break;
-			case OPTION_MONITOR_CTX:
-				opts->monitor_context = 1;
-				opts->monitor_context_ivl = atoi(optarg);
-				break;
-			case OPTION_MONITOR_TRANSPORT:
-				if (optarg != NULL)
-				{
-					if (strcasecmp(optarg, "lbm") == 0)
-					{
-						opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_lbm_module();
-					}
-					else if (strcasecmp(optarg, "udp") == 0)
-					{
-						opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_udp_module();
-					}
-					else if (strcasecmp(optarg, "lbmsnmp") == 0)
-					{
-						opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_lbmsnmp_module();
-					}
-					else
-					{
-						++errflag;
-					}
-				}
-				else
-				{
-					++errflag;
+			case 'X':
+				if (optarg != NULL) {
+					strncpy(opts->xml_config, optarg, (sizeof(opts->xml_config)-1));
+					opts->xml_config[(sizeof(opts->xml_config)-1)]='\0';
+				} else {
+					errflag++;
 				}
 				break;
-			case OPTION_MONITOR_TRANSPORT_OPTS:
-				if (optarg != NULL)
-				{
-					strncpy(opts->transport_options_string, optarg, sizeof(opts->transport_options_string));
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_FORMAT:
-				if (optarg != NULL)
-				{
-					if (strcasecmp(optarg, "csv") == 0)
-					{
-						opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
-					}
-					else
-					{
-						++errflag;
-					}
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_FORMAT_OPTS:
-				if (optarg != NULL)
-				{
-					strncpy(opts->format_options_string, optarg, sizeof(opts->format_options_string));
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_APPID:
-				if (optarg != NULL)
-				{
-					strncpy(opts->application_id_string, optarg, sizeof(opts->application_id_string));
-				}
-				else
-				{
-					++errflag;
+			case 'Y':
+				if (optarg != NULL) {
+					strncpy(opts->xml_appname, optarg, (sizeof(opts->xml_appname)-1));
+					opts->xml_appname[(sizeof(opts->xml_appname)-1)]='\0';
+				} else {
+					errflag++;
 				}
 				break;
 			default:
@@ -985,10 +897,10 @@ int main(int argc, char **argv)
 	char *message = NULL;
 	int msgs_per_ivl = 1;	/* stores result from calc_rate_vals */
 	size_t optlen = 0;
-	lbmmon_sctl_t * monctl;
 	lbm_ume_src_force_reclaim_func_t reclaim_func;
 	lbm_ume_ctx_rcv_ctx_notification_func_t liveness_notification;
 	int xflag = 0;
+	char * xml_config_env_check = NULL;
 
 #ifdef __VOS__
 	set_rr_scheduling(); /* set round-robin scheduling policy for thread */
@@ -1026,6 +938,24 @@ int main(int argc, char **argv)
 	if (opts->conffname[0] != '\0') {
 		if (lbm_config(opts->conffname) == LBM_FAILURE) {
 			fprintf(stderr, "lbm_config: %s\n", lbm_errmsg());
+			exit(1);
+		}
+	}
+
+	if(opts->xml_config[0] != '\0'){
+		/* Exit if env is set to pre-load an XML file */
+		if ((xml_config_env_check = getenv("LBM_XML_CONFIG_FILENAME")) != NULL) {
+			fprintf(stderr, "\n ERROR!: Please unset LBM_XML_CONFIG_FILENAME so that an XML file can be loaded \n" );
+			exit(1);
+		}
+		if ((xml_config_env_check = getenv("LBM_UMM_INFO")) != NULL) {
+			fprintf(stderr, "\n ERROR!: Please unset LBM_UMM_INFO so that an XML file can be loaded \n" );
+			exit(1);
+		}
+		/* Initialize configuration parameters from an XML file. */
+		if (lbm_config_xml_file(opts->xml_config, (const char *) opts->xml_appname ) == LBM_FAILURE) {
+			fprintf(stderr, "Couldn't load lbm_config_xml_file: appname: %s xml_config: %s : Error: %s\n",
+			opts->xml_appname, opts->xml_config, lbm_errmsg());
 			exit(1);
 		}
 	}
@@ -1266,46 +1196,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (opts->monitor_context || opts->monitor_source)
-	{
-		char * transport_options = NULL;
-		char * format_options = NULL;
-		char * application_id = NULL;
-
-		if (strlen(opts->transport_options_string) > 0)
-		{
-			transport_options = opts->transport_options_string;
-		}
-		if (strlen(opts->format_options_string) > 0)
-		{
-			format_options = opts->format_options_string;
-		}
-		if (strlen(opts->application_id_string) > 0)
-		{
-			application_id = opts->application_id_string;
-		}
-		if (lbmmon_sctl_create(&monctl, opts->format, format_options, opts->transport, transport_options) == -1)
-		{
-			fprintf(stderr, "lbmmon_sctl_create() failed, %s\n", lbmmon_errmsg());
-			exit(1);
-		}
-		if (opts->monitor_context)
-		{
-			if (lbmmon_context_monitor(monctl, ctx, application_id, opts->monitor_context_ivl) == -1)
-			{
-				fprintf(stderr, "lbmmon_context_monitor() failed, %s\n", lbmmon_errmsg());
-				exit(1);
-			}
-		}
-		else
-		{
-			if (lbmmon_src_monitor(monctl, src, application_id, opts->monitor_source_ivl) == -1)
-			{
-				fprintf(stderr, "lbmmon_src_monitor() failed, %s\n", lbmmon_errmsg());
-				exit(1);
-			}
-		}
-	}
 	if (opts->delay > 0) {
 		printf("Delaying for %d second%s\n", opts->delay, ((opts->delay > 1) ? "s" : ""));
 		SLEEP_SEC(opts->delay);
@@ -1326,7 +1216,8 @@ int main(int argc, char **argv)
 			} else {
 				sprintf(message, "message %lu", count);
 			}
-			exinfo.ume_msg_clientd = (void *)((lbm_uint_t)count + 1);
+			exinfo.ume_msg_clientd = (void *)((long long)count + 1);
+			//exinfo.ume_msg_clientd = (void *)((lbm_uint_t)count + 1);
 			last_clientd_sent = (lbm_uint_t)count + 1;
 			if (opts->seqnum_info) {
 				exinfo.flags |= LBM_SRC_SEND_EX_FLAG_SEQUENCE_NUMBER_INFO;
@@ -1340,7 +1231,7 @@ int main(int argc, char **argv)
 				{
 					while (blocked)
 					{
-						SLEEP_MSEC(100);
+						SLEEP_MSEC(10);
 					}
 					continue;
 				}
@@ -1419,30 +1310,6 @@ int main(int argc, char **argv)
 	if (opts->linger > 0) {
 		printf("Lingering for %d seconds...\n", opts->linger);
 		SLEEP_SEC(opts->linger);
-	}
-	if (opts->monitor_context || opts->monitor_source)
-	{
-		if (opts->monitor_context)
-		{
-			if (lbmmon_context_unmonitor(monctl, ctx) == -1)
-			{
-				fprintf(stderr, "lbmmon_context_unmonitor() failed\n");
-				exit(1);
-			}
-		}
-		else
-		{
-			if (lbmmon_src_unmonitor(monctl, src) == -1)
-			{
-				fprintf(stderr, "lbmmon_src_unmonitor() failed\n");
-				exit(1);
-			}
-		}
-		if (lbmmon_sctl_destroy(monctl) == -1)
-		{
-			fprintf(stderr, "lbmmon_sctl_destoy() failed()\n");
-			exit(1);
-		}
 	}
 
 	printf("Deleting source\n");

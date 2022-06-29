@@ -97,17 +97,11 @@ const char Usage[] =
 "                              (-v -v = be even more verbose)\n"
 "  -V, --verify                verify message contents\n"
 "  -x, --no-exit-on-reg-error  don't exit on registration error (default is to exit)\n"
-MONOPTS_RECEIVER
-MONMODULEOPTS_SENDER;
+"  -X, --xml-config=FILE     Use UM XML configuration FILE\n"
+"  -Y, --xml-appname=APP     Use UM XML APP application name\n"
+;
 
-const char * OptionString = "Ac:D:Ee:hi:N:r:s:SU:u:vVx";
-#define OPTION_MONITOR_RCV 0
-#define OPTION_MONITOR_CTX 1
-#define OPTION_MONITOR_TRANSPORT 2
-#define OPTION_MONITOR_TRANSPORT_OPTS 3
-#define OPTION_MONITOR_FORMAT 4
-#define OPTION_MONITOR_FORMAT_OPTS 5
-#define OPTION_MONITOR_APPID 6
+const char * OptionString = "Ac:D:Ee:hi:N:r:s:SU:u:vVxX:Y:";
 #define OPTION_MAX_SOURCES 7
 #define OPTION_SESSION_ID 8
 const struct option OptionTable[] =
@@ -129,13 +123,8 @@ const struct option OptionTable[] =
 	{ "verify", no_argument, NULL, 'V' },
 	{ "no-exit-on-reg-error", no_argument, NULL, 'x' },
 	{ "max-sources", required_argument, NULL, OPTION_MAX_SOURCES },
-	{ "monitor-rcv", required_argument, NULL, OPTION_MONITOR_RCV },
-	{ "monitor-ctx", required_argument, NULL, OPTION_MONITOR_CTX },
-	{ "monitor-transport", required_argument, NULL, OPTION_MONITOR_TRANSPORT },
-	{ "monitor-transport-opts", required_argument, NULL, OPTION_MONITOR_TRANSPORT_OPTS },
-	{ "monitor-format", required_argument, NULL, OPTION_MONITOR_FORMAT },
-	{ "monitor-format-opts", required_argument, NULL, OPTION_MONITOR_FORMAT_OPTS },
-	{ "monitor-appid", required_argument, NULL, OPTION_MONITOR_APPID },
+	{ "xml-config", required_argument, NULL, 'X' },
+	{ "xml-appname", required_argument, NULL, 'Y' },
 	{ NULL, 0, NULL, 0 }
 };
 
@@ -149,31 +138,25 @@ struct Options {
 	int seqnum_offset;  /* Offset for low end of sequence number range */
 	int msg_limit;      /* Limit on number of messages to receive */
 	int stats_ivl;      /* Interval for dumping statistics, in seconds */
-	int summary;   /* Flag to display a summary when source stops */
+	int summary;        /* Flag to display a summary when source stops */
 	lbm_uint_t uregid;  /* User registration ID */
 	int verbose;        /* Flag to control program verbosity */
 	int verify;         /* Flag to control message verification (verifymsg.h) */
 	int exit_on_reg_error; /* Flag to control whether app exits on registration error */
 	char conffname[256]; /* Configuration filename */
 
-	char transport_options_string[1024];    /* Transport options given to lbmmon_sctl_create() */
-	char format_options_string[1024];       /* Format options given to lbmmon_sctl_create()  */
-	char application_id_string[1024];       /* Application ID given to lbmmon_context_monitor() */
-	int monitor_context;                    /* Flag to control context level monitoring */
-	int monitor_context_ivl;                /* Interval for context level monitoring */
-	int monitor_receiver;                   /* Flag to control receiver level monitoring */
-	int monitor_receiver_ivl;               /* Interval for receiver level monitoring */
-	lbmmon_transport_func_t * transport;    /* Function pointer to chosen transport module */
-	lbmmon_format_func_t * format;          /* Function pointer to chosen format module  */
 	char *topic;                            /* The topic on which messages will be received */
 	int deregister;
 	char session_id[25];
+	char xml_config[256];
+	char xml_appname[256];
 } options;
 
 
 #define DEFAULT_MAX_NUM_SRCS 10000
 #define DEFAULT_NUM_SRCS 10
 
+struct timeval cur_tv;
 int msg_count = 0;
 int rx_msg_count = 0;
 int total_msg_count = 0;
@@ -243,9 +226,10 @@ void print_bw(FILE *fp, struct timeval *tv, int msgs, int bytes, int unrec, lbm_
 }
 
 /* Print transport statistics */
-void print_stats(FILE *fp, lbm_rcv_transport_stats_t *stats, int nstats)
+void print_stats(FILE *fp, lbm_rcv_transport_stats_t *stats, int nstats, lbm_context_t *ctx)
 {
 	int i;
+	lbm_context_stats_t ctx_stats;
 
 	for (i = 0; i < nstats; i++)
 	{
@@ -341,6 +325,15 @@ void print_stats(FILE *fp, lbm_rcv_transport_stats_t *stats, int nstats)
 			break;
 		}
 	}
+
+	{
+		lbm_context_retrieve_stats(ctx, &ctx_stats);
+		printf("CONTEXT_STATS, tr_rcv_topics:%lu, tr_sent (%lu/%lu),tr_rcved (%lu/%lu), dropped(%lu/%lu/%lu), send_failed:%lu, blocked(%lu/%lu/%lu/%lu) \n",
+		 ctx_stats.tr_rcv_topics, ctx_stats.tr_dgrams_sent, ctx_stats.tr_bytes_sent,  ctx_stats.tr_dgrams_rcved, ctx_stats.tr_bytes_rcved,
+		 ctx_stats.tr_dgrams_dropped_ver, ctx_stats.tr_dgrams_dropped_type, ctx_stats.tr_dgrams_dropped_malformed, ctx_stats.tr_dgrams_send_failed,
+		 ctx_stats.send_would_block, ctx_stats.send_blocked, ctx_stats.resp_blocked, ctx_stats.resp_would_block);
+	}
+
 	fflush(fp);
 }
 
@@ -373,10 +366,26 @@ void dump(const char *buffer, int size)
 	printf("\t%s\n",textver);
 }
 
+void print_tv(struct timeval *tv){
+/*
+	time_t nowtime;
+	struct tm *nowtm;
+	char tmbuf[64];
+
+	nowtime = tv->tv_sec;
+	nowtm = localtime(&nowtime);
+	strftime(tmbuf, 64, "%Y-%m-%d:%H.%M.%S", nowtm);
+	printf("[%s.%06d]: ", tmbuf, (int) tv->tv_usec);
+*/
+	printf("[@%lu.%06lu]", (unsigned long)tv->tv_sec, tv->tv_usec);
+}
 /* Logging handler passed into lbm_log() */
 int lbm_log_msg(int level, const char *message, void *clientd)
 {
 	int newline = 1;
+
+	current_tv (&cur_tv);
+	print_tv (&cur_tv);
 
 	if (message[strlen(message)-1] == '\n')
 		newline = 0;
@@ -441,6 +450,7 @@ int rcv_handle_immediate_msg(lbm_context_t *ctx, lbm_msg_t *msg, void *clientd)
 			if (opts->ascii > 1) putchar('\n');
 		}
 		if (opts->verbose) {
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 			printf("IM [%s][%u], %lu bytes\n", msg->source,
 					msg->sequence_number, (unsigned long)msg->len);
 			if (opts->verbose > 1)
@@ -559,12 +569,14 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		unrec_count++;
 		total_unrec_count++;
 		if (opts->verbose) {
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 			printf("[%s][%s][%x], LOST\n", msg->topic_name, msg->source, msg->sequence_number);
 		}
 		break;
 	case LBM_MSG_UNRECOVERABLE_LOSS_BURST:
 		burst_loss++;
 		if (opts->verbose) {
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 			printf("[%s][%s][%x], LOST BURST\n", msg->topic_name, msg->source, msg->sequence_number);
 		}
 		break;
@@ -577,11 +589,18 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		subtotal_msg_count++;
 		byte_count += msg->len;
 		total_byte_count += msg->len;
+		if (opts->verbose) {
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
+			printf("[%s][%s][%u], Request\n",
+					msg->topic_name, msg->source, msg->sequence_number);
+		}
 		break;
 	case LBM_MSG_BOS:
+		printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 		printf("[%s][%s], Beginning of Transport Session\n", msg->topic_name, msg->source);
 		break;
 	case LBM_MSG_EOS:
+		printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 		printf("[%s][%s], End of Transport Session\n", msg->topic_name, msg->source);
 		subtotal_msg_count = 0;
 
@@ -604,6 +623,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		{
 			lbm_msg_ume_registration_t *reg = (lbm_msg_ume_registration_t *)(msg->data);
 
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 			printf("[%s][%s] UME registration successful. SrcRegID %u RcvRegID %u\n",
 					msg->topic_name, msg->source, reg->src_registration_id, reg->rcv_registration_id);
 		}
@@ -612,6 +632,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		{
 			lbm_msg_ume_registration_ex_t *reg = (lbm_msg_ume_registration_ex_t *)(msg->data);
 
+			printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 			printf("[%s][%s] store %u: %s UME registration successful. SrcRegID %u RcvRegID %u. Flags %x ",
 				msg->topic_name, msg->source, reg->store_index, reg->store,
 				reg->src_registration_id, reg->rcv_registration_id, reg->flags);
@@ -664,6 +685,7 @@ int rcv_handle_msg(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd)
 		}
 		break;
 	case LBM_MSG_UME_REGISTRATION_CHANGE:
+		printf("[@%lu.%06lu]", (unsigned long)msg->tsp.tv_sec, msg->tsp.tv_usec);
 		printf("[%s][%s] UME registration change: %s\n", msg->topic_name, msg->source, msg->data);
 		break;
 	default:
@@ -753,13 +775,9 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 	opts->regid_offset = 1000;
 	opts->max_sources = DEFAULT_NUM_SRCS;
 	opts->conffname[0] = '\0';
-	opts->transport_options_string[0] = '\0';
-	opts->format_options_string[0] = '\0';
-	opts->application_id_string[0] = '\0';
-	opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_lbm_module();
-	opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
 	opts->exit_on_reg_error = 1;
 	opts->deregister = -1;
+	opts->xml_config[256] = '\0';
 
 	/* Process the command line options, setting local variables with values */
 	while ((c = getopt_long(argc, argv, OptionString, OptionTable, NULL)) != EOF)
@@ -824,89 +842,6 @@ void process_cmdline(int argc, char **argv, struct Options *opts)
 			case 'x':
 				opts->exit_on_reg_error = 0;
 				break;
-			case OPTION_MONITOR_CTX:
-				opts->monitor_context = 1;
-				opts->monitor_context_ivl = atoi(optarg);
-				break;
-			case OPTION_MONITOR_RCV:
-				opts->monitor_receiver = 1;
-				opts->monitor_receiver_ivl = atoi(optarg);
-				break;
-			case OPTION_MAX_SOURCES:
-				opts->max_sources = atoi(optarg);
-				break;
-			case OPTION_MONITOR_TRANSPORT:
-				if (optarg != NULL)
-				{
-					if (strcasecmp(optarg, "lbm") == 0)
-					{
-						opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_lbm_module();
-					}
-					else if (strcasecmp(optarg, "udp") == 0)
-					{
-						opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_udp_module();
-					}
-					else if (strcasecmp(optarg, "lbmsnmp") == 0)
-					{
-						opts->transport = (lbmmon_transport_func_t *) lbmmon_transport_lbmsnmp_module();
-					}
-					else
-					{
-						++errflag;
-					}
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_TRANSPORT_OPTS:
-				if (optarg != NULL)
-				{
-					strncpy(opts->transport_options_string, optarg, sizeof(opts->transport_options_string));
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_FORMAT:
-				if (optarg != NULL)
-				{
-					if (strcasecmp(optarg, "csv") == 0)
-					{
-						opts->format = (lbmmon_format_func_t *) lbmmon_format_csv_module();
-					}
-					else
-					{
-						++errflag;
-					}
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_FORMAT_OPTS:
-				if (optarg != NULL)
-				{
-					strncpy(opts->format_options_string, optarg, sizeof(opts->format_options_string));
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
-			case OPTION_MONITOR_APPID:
-				if (optarg != NULL)
-				{
-					strncpy(opts->application_id_string, optarg, sizeof(opts->application_id_string));
-				}
-				else
-				{
-					++errflag;
-				}
-				break;
 			default:
 				errflag++;
 				break;
@@ -939,7 +874,6 @@ int main(int argc, char **argv)
 	size_t optlen;
 	lbm_ipv4_address_mask_t unicast_target_iface;
 	struct in_addr inaddr;
-	lbmmon_sctl_t * monctl;
 	struct timeval stattv;
 
 	double total_time = 0.0;
@@ -948,6 +882,7 @@ int main(int argc, char **argv)
 	lbm_ulong_t lost_tmp;
 	int have_stats = 0, set_nstats;
 	int i;
+	char * xml_config_env_check = NULL;
 
 #ifdef __VOS__
 	set_rr_scheduling();	/* set round-robin thread scheduling policy */
@@ -998,7 +933,24 @@ int main(int argc, char **argv)
 		fprintf(stderr, "lbm_log: %s\n", lbm_errmsg());
 		exit(1);
 	}
-	/* Retrieve current context settings */
+	if(opts->xml_config[0] != '\0'){
+		/* Exit if env is set to pre-load an XML file */
+		if ((xml_config_env_check = getenv("LBM_XML_CONFIG_FILENAME")) != NULL) {
+			fprintf(stderr, "\n ERROR!: Please unset LBM_XML_CONFIG_FILENAME so that an XML file can be loaded \n" );
+			exit(1);
+		}
+		if ((xml_config_env_check = getenv("LBM_UMM_INFO")) != NULL) {
+			fprintf(stderr, "\n ERROR!: Please unset LBM_UMM_INFO so that an XML file can be loaded \n" );
+			exit(1);
+		}
+		/* Initialize configuration parameters from an XML file. */
+		if (lbm_config_xml_file(opts->xml_config, (const char *) opts->xml_appname ) == LBM_FAILURE) {
+			fprintf(stderr, "Couldn't load lbm_config_xml_file: appname: %s xml_config: %s : Error: %s\n",
+			opts->xml_appname, opts->xml_config, lbm_errmsg());
+			exit(1);
+		}
+	}
+	/* Retrieve default / configuration-modified context settings */
 	if (lbm_context_attr_create(&ctx_attr) == LBM_FAILURE) {
 		fprintf(stderr, "lbm_context_attr_create: %s\n", lbm_errmsg());
 		exit(1);
@@ -1018,6 +970,12 @@ int main(int argc, char **argv)
 			fprintf(stderr, "lbm_context_attr_set_from_xml - context_name: %s\n", lbm_errmsg());
 			exit(1);
 		}
+		/* init rcv topic attributes */
+		if (lbm_rcv_topic_attr_create_from_xml (&rcv_attr, ctx_name, opts->topic)){
+			fprintf(stderr, "lbm_rcv_topic_attr_create: %s\n", lbm_errmsg());
+			exit(1);
+		}
+
 	}	
 	/* Retrieve operational mode setting from context attribute structure */
 	optlen = sizeof(opmode);
@@ -1108,12 +1066,6 @@ int main(int argc, char **argv)
 	/* Initialize immediate message handler (for topicless immediate sends) */
 	if (lbm_context_rcv_immediate_msgs(ctx, rcv_handle_immediate_msg, NULL, NULL) == LBM_FAILURE) {
 		fprintf(stderr, "lbm_context_rcv_immediate_msgs: %s\n", lbm_errmsg());
-		exit(1);
-	}
-
-	/* init rcv topic attributes */
-	if (lbm_rcv_topic_attr_create(&rcv_attr) == LBM_FAILURE) {
-		fprintf(stderr, "lbm_rcv_topic_attr_create: %s\n", lbm_errmsg());
 		exit(1);
 	}
 
@@ -1214,47 +1166,6 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	if (opts->monitor_context || opts->monitor_receiver)
-	{
-		char * transport_options = NULL;
-		char * format_options = NULL;
-		char * application_id = NULL;
-
-		if (strlen(opts->transport_options_string) > 0)
-		{
-			transport_options = opts->transport_options_string;
-		}
-		if (strlen(opts->format_options_string) > 0)
-		{
-			format_options = opts->format_options_string;
-		}
-		if (strlen(opts->application_id_string) > 0)
-		{
-			application_id = opts->application_id_string;
-		}
-		if (lbmmon_sctl_create(&monctl, opts->format, format_options, opts->transport, transport_options) == -1)
-		{
-			fprintf(stderr, "lbmmon_sctl_create() failed, %s\n", lbmmon_errmsg());
-			exit(1);
-		}
-		if (opts->monitor_context)
-		{
-			if (lbmmon_context_monitor(monctl, ctx, application_id, opts->monitor_context_ivl) == -1)
-			{
-				fprintf(stderr, "lbmmon_context_monitor() failed, %s\n", lbmmon_errmsg());
-				exit(1);
-			}
-		}
-		else
-		{
-			if (lbmmon_rcv_monitor(monctl, rcv, application_id, opts->monitor_receiver_ivl) == -1)
-			{
-				fprintf(stderr, "lbmmon_rcv_monitor() failed, %s\n", lbmmon_errmsg());
-				exit(1);
-			}
-		}
-	}
-
 	if ( opts->stats_ivl ) {
 		current_tv ( &stattv );
 		stattv.tv_sec += opts->stats_ivl;
@@ -1339,7 +1250,7 @@ int main(int argc, char **argv)
 			print_bw(stdout, &endtv, msg_count,
 					byte_count, unrec_count, lost, rx_msg_count);
 		if ( flPrintStats ) {
- 			print_stats(stdout, stats, set_nstats);
+ 			print_stats(stdout, stats, set_nstats, ctx);
 			current_tv ( &stattv );
 			stattv.tv_sec += opts->stats_ivl;
 		}
@@ -1384,33 +1295,6 @@ int main(int argc, char **argv)
 	else
 		printf("Quitting.... received %u messages\n", total_msg_count);
 
-	if (opts->monitor_context || opts->monitor_receiver)
-	{
-		if (opts->monitor_context)
-		{
-			if (lbmmon_context_unmonitor(monctl, ctx) == -1)
-			{
-				fprintf(stderr, "lbmmon_context_unmonitor() failed, %s\n", lbmmon_errmsg());
-				exit(1);
-			}
-		}
-		else
-		{
-			if (rcv != NULL)
-			{
-				if (lbmmon_rcv_unmonitor(monctl, rcv) == -1)
-				{
-					fprintf(stderr, "lbmmon_rcv_unmonitor() failed, %s\n", lbmmon_errmsg());
-					exit(1);
-				}
-			}
-		}
-		if (lbmmon_sctl_destroy(monctl) == -1)
-		{
-			fprintf(stderr, "lbmmon_sctl_destoy() failed(), %s\n", lbmmon_errmsg());
-			exit(1);
-		}
-	}
 
 	SLEEP_SEC(5);
 

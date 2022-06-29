@@ -1,0 +1,70 @@
+Examples for monitoring:
+
+EXAMPLE: Environment variables:
+========================================================
+Setting env on linux: 
+----------------------------
+export LBM_MONITOR_FORMAT=pb
+export LBM_MONITOR_FORMAT_OPTS="passthrough=convert"
+export LBM_MONITOR_APPID=myapplication
+export LBM_MONITOR_INTERVAL=1
+export LBM_MONITOR_TRANSPORT=lbm
+
+Setting env on windows:
+-----------------------------
+set "LBM_MONITOR_FORMAT=pb"
+set "LBM_MONITOR_FORMAT_OPTS=passthrough=convert"
+set "LBM_MONITOR_APPID=myapplication"
+set "LBM_MONITOR_INTERVAL=1"
+set "LBM_MONITOR_TRANSPORT=lbm"
+
+
+2) Temporarily setting the env variables in the command line: 
+========================================================
+Linux:
+-----------------------------
+export LBM_MONITOR_TRANSPORT_OPTS=context|resolver_multicast_address=226.17.17.7
+env LBM_MONITOR_INTERVAL=2 LBM_MONITOR_TRANSPORT_OPTS="context|resolver_multicast_address=226.17.17.7" gcsrcv mytopic
+lbmmon --transport-opts="context|resolver_multicast_address=226.17.17.7"
+
+limited capabilities in windows, but you can do this: 
+-----------------------------
+lbmmon --transport-opts="context|resolver_multicast_address=226.17.17.7"
+cmd /V /C  "set "LBM_MONITOR_INTERVAL=1" && gcsrcv mytopic"
+
+
+3) Example monitoring configs: 
+========================================================
+#context monitor_transport_opts context|resolver_multicast_interface="en0";config=/um/mon.cfg
+#context monitor_transport_opts context|resolver_multicast_address="en0";config=/um/mon.cfg
+#event_queue monitor_format_opts passthrough=convert
+#context monitor_format pb
+#event_queue monitor_appid MyApplication
+
+
+4) Recommended customer configs for monitoring:
+Ref: https://ultramessaging.github.io/currdoc/doc/Operations/html1/index.html#automaticmonitoring
+========================================================
+context     monitor_format pb
+#                 (only with UM versions 6.14 and beyond)
+event_queue monitor_format pb
+#                 (only if event queues are being used with UM versions 6.14 and beyond)
+context     monitor_transport lbm
+event_queue monitor_transport lbm
+#                 (only if event queues are being used)
+context     monitor_interval 600
+event_queue monitor_interval 600
+#                 (only if event queues are being used)
+receiver    monitor_interval 600
+#                 (warning, may not be appropriate for applications that create large
+#                  numbers of receivers; only recommended for UM version 6.14
+#                  and beyond and "context monitor_format pb" is used.)
+wildcard_receiver monitor_interval 600
+#                 (warning, may not be appropriate for applications that create large
+#                  numbers of wildcard receivers; only recommended for UM version 6.14
+#                  and beyond and "context monitor_format pb" is used.)
+context     monitor_transport_opts context|default_interface="en0"; context|resolver_unicast_daemon="en0"->10.1.2.3:12000;source|transport=tcp
+#                 (must be entered as a single long line; "en0" is a Unix-style interface name; 10.1.2.3:12000 is the IP and port for the LBMRD daemon)
+event_queue monitor_transport_opts context|default_interface="en0"; context|resolver_unicast_daemon="en0"->10.1.2.3:12000;source|transport=tcp
+#                 (only if event queues are being used)
+========================================================
