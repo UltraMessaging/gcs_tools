@@ -1217,7 +1217,6 @@ int main(int argc, char **argv)
 				sprintf(message, "message %lu", count);
 			}
 			exinfo.ume_msg_clientd = (void *)((long long)count + 1);
-			//exinfo.ume_msg_clientd = (void *)((lbm_uint_t)count + 1);
 			last_clientd_sent = (lbm_uint_t)count + 1;
 			if (opts->seqnum_info) {
 				exinfo.flags |= LBM_SRC_SEND_EX_FLAG_SEQUENCE_NUMBER_INFO;

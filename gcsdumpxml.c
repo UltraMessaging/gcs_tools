@@ -208,7 +208,6 @@ int rcv_callback(lbm_rcv_t *rcv, lbm_msg_t *msg, void *clientd){
 }
 
 
-const char purpose[] = "Purpose: Receive messages on a single topic.";
 const char usage[] =
 "Usage:  [-a xml_appname] [-c context_name] [-s source_topic] [-r receive_topic] [-e evq_name] [-w wildward_topic] [-h hfx_topic] [-x xml_config] [-H] \n"
 "Available options:\n"

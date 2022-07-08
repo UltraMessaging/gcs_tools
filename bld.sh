@@ -1,7 +1,7 @@
 #!/bin/sh
 # bld.sh - build the programs on Linux.
 
-source ../../lbm.sh
+source ../lbm.sh
 LD_LIBRARY_PATH=$LBM671/lib; export LD_LIBRARY_PATH
 
 # For Linux

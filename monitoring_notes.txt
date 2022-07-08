@@ -43,7 +43,8 @@ cmd /V /C  "set "LBM_MONITOR_INTERVAL=1" && gcsrcv mytopic"
 
 
 4) Recommended customer configs for monitoring:
-Ref: https://ultramessaging.github.io/currdoc/doc/Operations/html1/index.html#automaticmonitoring
+Ref:
+https://ultramessaging.github.io/currdoc/doc/Operations/html1/index.html#automaticmonitoring
 ========================================================
 context     monitor_format pb
 #                 (only with UM versions 6.14 and beyond)
@@ -68,3 +69,7 @@ context     monitor_transport_opts context|default_interface="en0"; context|reso
 event_queue monitor_transport_opts context|default_interface="en0"; context|resolver_unicast_daemon="en0"->10.1.2.3:12000;source|transport=tcp
 #                 (only if event queues are being used)
 ========================================================
+Note that the intent of the lbmrd configured above is to have a parallel unicast-only TRD for monitoring, separate from the application TRD. 
+Ref: https://github.com/UltraMessaging/mon_demo#configuration-goals
+
+
