@@ -1,7 +1,7 @@
 #!/bin/sh
 # bld.sh - build the programs on Linux.
 
-source ~/lbm.sh
+source ../lbm.sh
 LD_LIBRARY_PATH=$LBM671/lib; export LD_LIBRARY_PATH
 
 # For Linux
@@ -36,5 +36,8 @@ gcc -Wall -g \
 
 gcc -Wall -g -l m \
     -o linux64_bin/gcsmpong gcsmpong.c
+
+gcc -Wall -g -I $LBM671/include -I $LBM671/include/lbm -L $LBM671/lib -l lbm $LIBS \
+    -o linux64_bin/gcsdumpxml gcsdumpxml.c
 
 zip -qr linux64_bin.zip linux64_bin
