@@ -10,13 +10,15 @@ for better instructional example code.
 
 # Table of contents
 
-- [gcs_tools](#gcs_tools)
-- [Table of contents](#table-of-contents)
-  - [COPYRIGHT AND LICENSE](#copyright-and-license)
-  - [REPOSITORY](#repository)
-  - [INTRODUCTION](#introduction)
-
-<sup>(table of contents from https://luciopaiva.com/markdown-toc/)</sup>
+<!-- mdtoc-start -->
+&bull; [gcs_tools](#gcs_tools)  
+&bull; [Table of contents](#table-of-contents)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [COPYRIGHT AND LICENSE](#copyright-and-license)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [REPOSITORY](#repository)  
+&nbsp;&nbsp;&nbsp;&nbsp;&bull; [INTRODUCTION](#introduction)  
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&bull; [BUILDING TEST TOOLS](#building-test-tools)  
+<!-- TOC created by '../mdtoc/mdtoc.pl README.md' (see https://github.com/fordsfords/mdtoc) -->
+<!-- mdtoc-end -->
 
 ## COPYRIGHT AND LICENSE
 
