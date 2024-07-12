@@ -6,8 +6,7 @@ for F in *.md; do :
     # Update doc table of contents (see https://github.com/fordsfords/mdtoc).
     if which mdtoc.pl >/dev/null; then mdtoc.pl -b "" $F;
     elif [ -x ../mdtoc/mdtoc.pl ]; then ../mdtoc/mdtoc.pl -b "" $F;
-    else echo "FYI: mdtoc.pl not found; see https://github.com/fordsfords/mdtoc"; exit 1
-    fi
+    else echo "FYI: mdtoc.pl not found; Skipping doc build"; echo ""; fi
   fi
 done
 
@@ -19,6 +18,8 @@ LIBS="-l pthread -l m -l rt"
 
 rm -rf linux64_bin linux64_bin.zip
 mkdir linux64_bin
+
+echo "Building code"
 
 gcc -Wall -g -I $LBM671/include -I $LBM671/include/lbm -L $LBM671/lib -l lbm $LIBS \
     -o linux64_bin/gcsmrcv verifymsg.c gcsmrcv.c
@@ -51,3 +52,5 @@ gcc -Wall -g -I $LBM671/include -I $LBM671/include/lbm -L $LBM671/lib -l lbm $LI
     -o linux64_bin/gcsdumpxml gcsdumpxml.c
 
 zip -qr linux64_bin.zip linux64_bin
+
+echo "Success"
